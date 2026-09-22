@@ -6,211 +6,141 @@
 //
 
 import Cocoa
-import LaunchAtLogin
+import UniformTypeIdentifiers
 
-class ViewController: NSViewController, NSTableViewDelegate, NSWindowDelegate {
-    @objc dynamic var launchAtLogin = LaunchAtLogin.kvo
-    
-    @IBOutlet weak var launchHiddenSwitch: NSSwitch!
-    @IBOutlet weak var displayMenubarIcon: NSSwitch!
-    @IBOutlet weak var excludeBehaviourPopupOutlet: NSPopUpButton!
-    @IBOutlet weak var excludeBehaviourLabelOutlet: NSTextField!
-    @IBOutlet weak var excludedAppsTableView: NSTableView!
-    @IBOutlet weak var removeExcludedAppButtonOutlet: NSButton!
+class ViewController: NSViewController, NSTableViewDelegate, NSTableViewDataSource {
+
     @IBOutlet weak var launchAtLoginSwitch: NSSwitch!
+    @IBOutlet weak var launchHiddenSwitch: NSSwitch!
+    @IBOutlet weak var menuBarIconSwitch: NSSwitch!
+    @IBOutlet weak var listModePopUp: NSPopUpButton!
+    @IBOutlet weak var listModeLabel: NSTextField!
+    @IBOutlet weak var applicationTableView: NSTableView!
+    @IBOutlet weak var removeApplicationButton: NSButton!
     @IBOutlet weak var closeDelayTextField: NSTextField!
-    @IBOutlet weak var closeDelayLabel: NSTextField!
-    
+    @IBOutlet weak var versionLabel: NSTextField!
+
+    private var listedApplications = Settings.listedApplications
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        NSApp.activate(ignoringOtherApps: true)
-        view.window?.delegate = self
-        
-        setupViews()
-    }
-    
-    override var representedObject: Any? {
-        didSet {
-            // Update the view, if already loaded.
-        }
-    }
-    
-    func setupViews() {
-        print("launch at login:")
-        print(launchAtLogin)
 
-        if(swiftQuitSettings["menubarIconEnabled"] == "true"){
-            displayMenubarIcon.state = NSControl.StateValue.on
-        }
+        launchAtLoginSwitch.state = Settings.launchAtLogin ? .on : .off
+        launchHiddenSwitch.state = Settings.launchHidden ? .on : .off
+        menuBarIconSwitch.state = Settings.menuBarIconVisible ? .on : .off
 
-        if(swiftQuitSettings["launchHidden"] == "true"){
-            launchHiddenSwitch.state = NSControl.StateValue.on
-        }
+        listModeLabel.textColor = .labelColor
+        listModePopUp.selectItem(at: Settings.listMode == .quitOnlyListed ? 1 : 0)
 
-        excludeBehaviourLabelOutlet.textColor = .labelColor
+        closeDelayTextField.stringValue = "\(Settings.closeDelay)"
+        closeDelayTextField.toolTip = "How long to wait after the last window closes. 0 quits the app straight away."
 
-        if(swiftQuitSettings["excludeBehaviour"] == "excludeApps"){
-            excludeBehaviourPopupOutlet.title = "All Apps Except The Following"
-        }
-        else{
-            excludeBehaviourPopupOutlet.title = "The Following Apps"
-        }
+        versionLabel.stringValue = "v \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")"
 
-        excludedAppsTableView.dataSource = self
-        excludedAppsTableView.delegate = self
-
-        // Set the close delay value from settings
-        closeDelayTextField.stringValue = swiftQuitSettings["closeDelay"] ?? "2"
+        applicationTableView.dataSource = self
+        applicationTableView.delegate = self
+        removeApplicationButton.isHidden = true
     }
 
-    @objc func closeDelayChanged(_ sender: NSTextField) {
-        let value = sender.stringValue
-        // Validate that it's a positive number
-        if let intValue = Int(value), intValue > 0 {
-            SwiftQuit.setCloseDelay(value)
-        } else {
-            // Reset to previous value if invalid
-            sender.stringValue = swiftQuitSettings["closeDelay"] ?? "2"
-        }
-    }
-    
-    @IBAction func launchAtLoginToggle(_ sender: Any) {
-        
-        if launchAtLoginSwitch.state == NSControl.StateValue.on {
-            SwiftQuit.enableLaunchAtLogin()
-            LaunchAtLogin.isEnabled = true
+    @IBAction func toggleLaunchAtLogin(_ sender: NSSwitch) {
+        let enabled = sender.state == .on
 
+        do {
+            try Settings.setLaunchAtLogin(enabled)
         }
-        else{
-            SwiftQuit.disableLaunchAtLogin()
-            LaunchAtLogin.isEnabled = false
+        catch {
+            sender.state = enabled ? .off : .on
+            presentAlert(title: "Could not change the login item", message: "macOS refused the request: \(error.localizedDescription)\n\nSwift Quit usually needs to live in your Applications folder before it can start at login.")
+        }
+    }
 
-        }
-        
+    @IBAction func toggleLaunchHidden(_ sender: NSSwitch) {
+        Settings.launchHidden = sender.state == .on
     }
-    
-    @IBAction func displayMenubarIconToggle(_ sender: Any) {
-        
-        if displayMenubarIcon.state == NSControl.StateValue.on {
-            SwiftQuit.enableMenubarIcon()
-            SwiftQuit.showMenu()
-        }
-        else{
-            SwiftQuit.disableMenubarIcon()
-            SwiftQuit.hideMenu()
-            
-            let disableMenubarAlert = NSAlert()
-            disableMenubarAlert.messageText = "App Hidden from Menubar"
-            disableMenubarAlert.informativeText = "If you need to access it, simply launch the app again to display the settings page."
-            disableMenubarAlert.alertStyle = .informational
-            disableMenubarAlert.addButton(withTitle: "OK")
-            disableMenubarAlert.beginSheetModal(for: self.view.window!, completionHandler: nil)
 
-        }
-        
-    }
-    
-    @IBAction func launchHiddenToggle(_ sender: Any) {
-        
-        if launchHiddenSwitch.state == NSControl.StateValue.on {
-            SwiftQuit.enableLaunchHidden()
-        }
-        else{
-            SwiftQuit.disableLaunchHidden()
-        }
-    }
-    
-    @IBAction func changeExcludeBehaviour(_ sender: Any) {
-        
-        if(excludeBehaviourPopupOutlet.title == "All Apps Except The Following"){
-            SwiftQuit.enableExcludedApps()
-        }
-        else{
-            swiftQuitSettings["excludeBehaviour"] = "includeApps"
-            SwiftQuit.enableIncludedApps()
-        }
-    }
-    
-    @IBAction func addExcludedApp(_ sender: Any) {
-        let dialog = NSOpenPanel();
-        let directory = URL(string: "file:///System/Applications/")
-        
-        dialog.title                   = "Choose Application";
-        dialog.showsResizeIndicator    = true;
-        dialog.showsHiddenFiles        = false;
-        dialog.canChooseFiles = true;
-        dialog.canChooseDirectories = true;
-        dialog.treatsFilePackagesAsDirectories = true
-        dialog.directoryURL = directory
-        
-        if (dialog.runModal() ==  NSApplication.ModalResponse.OK) {
-            let result = dialog.url
-            
-            if (result != nil) {
-                
-                swiftQuitExcludedApps.append(result!.path)
-                
-                let count = swiftQuitExcludedApps.count - 1
-                let indexSet = IndexSet(integer:count)
-                
-                excludedAppsTableView.beginUpdates()
-                excludedAppsTableView.insertRows(at:indexSet, withAnimation:.effectFade)
-                excludedAppsTableView.endUpdates()
-                
-                SwiftQuit.updateExcludedApps()
-            }
-        } else {
+    @IBAction func toggleMenuBarIcon(_ sender: NSSwitch) {
+        Settings.menuBarIconVisible = sender.state == .on
+
+        guard Settings.menuBarIconVisible else {
+            appDelegate.hideStatusItem()
+            presentAlert(title: "Hidden from the menu bar", message: "Open Swift Quit again from your Applications folder to get back to these settings.")
             return
         }
-    }
-    
-    @IBAction func removeExcludedApp(_ sender: Any) {
-        let row = excludedAppsTableView.selectedRow
-        
-        if(row != -1){
-            
-            let indexSet = IndexSet(integer:row)
-            excludedAppsTableView.beginUpdates()
-            swiftQuitExcludedApps.remove(at: row)
-            excludedAppsTableView.removeRows(at:indexSet, withAnimation:.effectFade)
-            excludedAppsTableView.endUpdates()
-            
-            if(swiftQuitExcludedApps.isEmpty){
-                removeExcludedAppButtonOutlet.isHidden = true
-            }
-            
-            SwiftQuit.updateExcludedApps()
-        }
-        
-    }
-    
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        let selectionCount = excludedAppsTableView.selectedRowIndexes.count
-        if(selectionCount != 0){
-            removeExcludedAppButtonOutlet.isHidden = false
-        }
-        else{
-            removeExcludedAppButtonOutlet.isHidden = true
-        }
-    }
-    
-}
 
-extension ViewController: NSTableViewDataSource {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        return swiftQuitExcludedApps.count
+        appDelegate.showStatusItem()
     }
-    
-    func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? {
-        let application = swiftQuitExcludedApps[row]
-        
-        let columnIdentifier = tableColumn!.identifier.rawValue
-        
-        if columnIdentifier == "path" {
-            return application
-        } else {
-            return nil
+
+    @IBAction func changeListMode(_ sender: NSPopUpButton) {
+        Settings.listMode = sender.indexOfSelectedItem == 1 ? .quitOnlyListed : .quitAllExceptListed
+    }
+
+    @IBAction func changeCloseDelay(_ sender: NSTextField) {
+        guard let delay = Int(sender.stringValue.trimmingCharacters(in: .whitespaces)), (0 ... maximumCloseDelay).contains(delay) else {
+            sender.stringValue = "\(Settings.closeDelay)"
+            return
         }
+
+        Settings.closeDelay = delay
+        sender.stringValue = "\(delay)"
     }
-    
+
+    @IBAction func addApplication(_ sender: Any) {
+        let panel = NSOpenPanel()
+
+        panel.title = "Choose Application"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+        guard panel.runModal() == .OK else { return }
+
+        let additions = panel.urls.compactMap { ListedApplication(path: $0.path) }.filter { addition in
+            !listedApplications.contains { $0.bundleIdentifier == addition.bundleIdentifier }
+        }
+
+        guard !additions.isEmpty else { return }
+
+        listedApplications.append(contentsOf: additions)
+        Settings.listedApplications = listedApplications
+        applicationTableView.reloadData()
+    }
+
+    @IBAction func removeApplication(_ sender: Any) {
+        let selection = applicationTableView.selectedRowIndexes
+
+        guard !selection.isEmpty else { return }
+
+        listedApplications.remove(atOffsets: IndexSet(selection))
+        Settings.listedApplications = listedApplications
+        applicationTableView.reloadData()
+        removeApplicationButton.isHidden = true
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        removeApplicationButton.isHidden = applicationTableView.selectedRowIndexes.isEmpty
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return listedApplications.count
+    }
+
+    func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? {
+        return listedApplications[row].name
+    }
+
+    func tableView(_ tableView: NSTableView, toolTipFor cell: NSCell, rect: NSRectPointer, tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint) -> String {
+        return listedApplications[row].path
+    }
+
+    private func presentAlert(title: String, message: String) {
+        let alert = NSAlert()
+
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: view.window!, completionHandler: nil)
+    }
 }

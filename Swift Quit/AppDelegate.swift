@@ -6,92 +6,89 @@
 //
 
 import Cocoa
-import AXSwift
-import Swindler
-import PromiseKit
-
-var userDefaults = UserDefaults.standard
-var swiftQuitSettings = SwiftQuit.getSettings()
-var swiftQuitExcludedApps = SwiftQuit.getExcludedApps()
-let storyboard = NSStoryboard(name: "Main", bundle: nil)
-var settingsWindow = (storyboard.instantiateController(withIdentifier: "settings") as! NSWindowController)
-var menu = NSMenu()
-var statusItem: NSStatusItem!
-var swindler: Swindler.State!
-var lastLaunchedAppPid : Int32 = 0;
 
 @main
 class AppDelegate: NSObject, NSApplicationDelegate {
-    
-    func applicationDidFinishLaunching(_ aNotification: Notification) {
-        
-        guard AXSwift.checkIsProcessTrusted(prompt: true) else {
-            print("Not trusted as an AX process; please authorize and re-launch")
-            NSApp.terminate(self)
-            return
+
+    private var statusItem: NSStatusItem?
+    private var pauseItem: NSMenuItem?
+    private lazy var settingsWindowController = NSStoryboard(name: "Main", bundle: nil).instantiateController(withIdentifier: "settings") as! NSWindowController
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        migrateVersionOneSettings()
+        WindowWatcher.start()
+
+        if Settings.menuBarIconVisible {
+            showStatusItem()
         }
-        
-        Swindler.initialize().done { state in
-            swindler = state
-            
-            SwiftQuit.activateAutomaticAppClosing()
-            
-            self.loadMenu()
-            
-            if(swiftQuitSettings["menubarIconEnabled"] == "false"){
-                SwiftQuit.hideMenu()
-            }
-            
-            if (swiftQuitSettings["launchHidden"] == "false"){
-                self.openSettings()
-            }
-            
-        }.catch { error in
-            print("Fatal error: failed to initialize Swindler: \(error)")
-            NSApp.terminate(self)
+
+        if !Settings.launchHidden {
+            openSettings()
         }
-        
     }
-    
-    func applicationWillTerminate(_ aNotification: Notification) {
-        // Insert code here to tear down your application
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard settingsWindowController.window?.isVisible != true else { return }
+
+        openSettings()
     }
-    
-    func applicationDidBecomeActive(_ aNotification: Notification) {
-        openSettings();
-    }
-    
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if (!flag) {
-            openSettings();
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows visibleWindows: Bool) -> Bool {
+        if !visibleWindows {
+            openSettings()
         }
+
         return true
     }
-    
-    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+
+    func applicationSupportsSecureRestorableState(_ application: NSApplication) -> Bool {
         return true
     }
-    
-    @objc func loadMenu(){
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.image = #imageLiteral(resourceName: "MenuIcon")
-            button.image?.size = NSSize(width: 18.0, height: 18.0)
-            button.image?.isTemplate = true
-        }
-        statusItem.isVisible = true
-        let openSettings = NSMenuItem(title: "Settings...", action: #selector(openSettings) , keyEquivalent: ",")
-        menu.addItem(openSettings)
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        statusItem.menu = menu
-    }
-    
+
     @objc func openSettings() {
-        settingsWindow.showWindow(self)
-        settingsWindow.shouldCloseDocument = true
+        settingsWindowController.showWindow(self)
         NSApp.activate(ignoringOtherApps: true)
     }
-    
-    
+
+    func showStatusItem() {
+        guard statusItem == nil else {
+            statusItem?.isVisible = true
+            return
+        }
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.image = NSImage(named: "MenuIcon")
+        item.button?.image?.size = NSSize(width: 18, height: 18)
+        item.button?.image?.isTemplate = true
+
+        let pause = NSMenuItem(title: "Pause Swift Quit", action: #selector(togglePause), keyEquivalent: "")
+        pause.state = Settings.paused ? .on : .off
+        pause.target = self
+        pauseItem = pause
+
+        let settings = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+
+        let menu = NSMenu()
+        menu.addItem(pause)
+        menu.addItem(.separator())
+        menu.addItem(settings)
+        menu.addItem(NSMenuItem(title: "Quit Swift Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        item.menu = menu
+
+        statusItem = item
+    }
+
+    func hideStatusItem() {
+        statusItem?.isVisible = false
+    }
+
+    @objc private func togglePause() {
+        Settings.paused.toggle()
+        pauseItem?.state = Settings.paused ? .on : .off
+    }
 }
 
+var appDelegate: AppDelegate {
+    return NSApp.delegate as! AppDelegate
+}

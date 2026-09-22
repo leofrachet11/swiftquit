@@ -713,8 +713,7 @@
                                 <rect key="frame" x="28" y="352" width="36" height="21"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <connections>
-                                    <action selector="launchAtLoginToggle:" target="XfG-lQ-9wD" id="gni-dm-Awn"/>
-                                    <binding destination="NFW-oP-p1K" name="value" keyPath="values.launchAtLogin.isEnabled" id="H53-I2-HiE"/>
+                                    <action selector="toggleLaunchAtLogin:" target="XfG-lQ-9wD" id="gni-dm-Awn"/>
                                 </connections>
                             </switch>
                             <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ICr-lq-5Ag">
@@ -788,7 +787,7 @@
                                     <font key="font" metaFont="system"/>
                                 </buttonCell>
                                 <connections>
-                                    <action selector="addExcludedApp:" target="XfG-lQ-9wD" id="jqZ-Wj-afe"/>
+                                    <action selector="addApplication:" target="XfG-lQ-9wD" id="jqZ-Wj-afe"/>
                                 </connections>
                             </button>
                             <button identifier="removeWhitelistAppBtn" hidden="YES" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="iSS-4h-sXR">
@@ -799,7 +798,7 @@
                                     <font key="font" metaFont="system"/>
                                 </buttonCell>
                                 <connections>
-                                    <action selector="removeExcludedApp:" target="XfG-lQ-9wD" id="srF-Za-zJv"/>
+                                    <action selector="removeApplication:" target="XfG-lQ-9wD" id="srF-Za-zJv"/>
                                 </connections>
                             </button>
                             <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="rXe-IF-9lm" userLabel="Exclude Behaviour Label">
@@ -815,7 +814,7 @@
                                 <rect key="frame" x="28" y="322" width="36" height="21"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <connections>
-                                    <action selector="displayMenubarIconToggle:" target="XfG-lQ-9wD" id="N2u-as-ZMx"/>
+                                    <action selector="toggleMenuBarIcon:" target="XfG-lQ-9wD" id="N2u-as-ZMx"/>
                                 </connections>
                             </switch>
                             <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="TaF-kw-tci">
@@ -841,14 +840,14 @@
                                     </menu>
                                 </popUpButtonCell>
                                 <connections>
-                                    <action selector="changeExcludeBehaviour:" target="XfG-lQ-9wD" id="VFp-hm-R8T"/>
+                                    <action selector="changeListMode:" target="XfG-lQ-9wD" id="VFp-hm-R8T"/>
                                 </connections>
                             </popUpButton>
                             <switch horizontalHuggingPriority="750" verticalHuggingPriority="750" fixedFrame="YES" controlSize="small" baseWritingDirection="leftToRight" alignment="left" translatesAutoresizingMaskIntoConstraints="NO" id="gmf-h2-qQq" userLabel="Launch Hidden Switch">
                                 <rect key="frame" x="28" y="292" width="36" height="21"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <connections>
-                                    <action selector="launchHiddenToggle:" target="XfG-lQ-9wD" id="Xu3-7h-zGE"/>
+                                    <action selector="toggleLaunchHidden:" target="XfG-lQ-9wD" id="Xu3-7h-zGE"/>
                                 </connections>
                             </switch>
                             <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="D4a-wa-IuM">
@@ -863,7 +862,7 @@
                             <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Xk7-bH-Xrg">
                                 <rect key="frame" x="71" y="265" width="170" height="16"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <textFieldCell key="cell" lineBreakMode="clipping" title="Close apps after (seconds):" id="6Wh-V5-uHf">
+                                <textFieldCell key="cell" lineBreakMode="clipping" title="Quit apps after (seconds):" id="6Wh-V5-uHf">
                                     <font key="font" metaFont="system"/>
                                     <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                     <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
@@ -872,31 +871,30 @@
                             <textField verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="aQz-HG-cKz">
                                 <rect key="frame" x="247" y="262" width="60" height="21"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" borderStyle="bezel" placeholderString="2" drawsBackground="YES" id="nLp-VJ-Tks">
+                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" borderStyle="bezel" placeholderString="0" drawsBackground="YES" id="nLp-VJ-Tks">
                                     <font key="font" usesAppearanceFont="YES"/>
                                     <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                     <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
                                 </textFieldCell>
                                 <connections>
-                                    <action selector="closeDelayChanged:" target="XfG-lQ-9wD" id="wvY-8Y-rBg"/>
+                                    <action selector="changeCloseDelay:" target="XfG-lQ-9wD" id="wvY-8Y-rBg"/>
                                 </connections>
                             </textField>
                         </subviews>
                     </view>
                     <connections>
-                        <outlet property="closeDelayLabel" destination="Xk7-bH-Xrg" id="Zyn-xF-hJ4"/>
+                        <outlet property="versionLabel" destination="jpv-fI-EXo" id="Zyn-xF-hJ4"/>
                         <outlet property="closeDelayTextField" destination="aQz-HG-cKz" id="g4m-vK-7cY"/>
-                        <outlet property="displayMenubarIcon" destination="se9-ao-qJt" id="He7-hI-qeh"/>
-                        <outlet property="excludeBehaviourLabelOutlet" destination="rXe-IF-9lm" id="44g-Vz-9Pn"/>
-                        <outlet property="excludeBehaviourPopupOutlet" destination="YLn-bL-2yh" id="8Xe-1h-ea1"/>
-                        <outlet property="excludedAppsTableView" destination="2RC-Ux-Uzx" id="bJz-iv-Tv2"/>
+                        <outlet property="menuBarIconSwitch" destination="se9-ao-qJt" id="He7-hI-qeh"/>
+                        <outlet property="listModeLabel" destination="rXe-IF-9lm" id="44g-Vz-9Pn"/>
+                        <outlet property="listModePopUp" destination="YLn-bL-2yh" id="8Xe-1h-ea1"/>
+                        <outlet property="applicationTableView" destination="2RC-Ux-Uzx" id="bJz-iv-Tv2"/>
                         <outlet property="launchAtLoginSwitch" destination="sxz-6t-zUP" id="J4E-Qp-JFm"/>
                         <outlet property="launchHiddenSwitch" destination="gmf-h2-qQq" id="BmN-4k-8TR"/>
-                        <outlet property="removeExcludedAppButtonOutlet" destination="iSS-4h-sXR" id="CeX-us-HM7"/>
+                        <outlet property="removeApplicationButton" destination="iSS-4h-sXR" id="CeX-us-HM7"/>
                     </connections>
                 </viewController>
                 <customObject id="rPt-NT-nkU" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
-                <userDefaultsController representsSharedInstance="YES" id="NFW-oP-p1K"/>
             </objects>
             <point key="canvasLocation" x="75.5" y="724"/>
         </scene>
