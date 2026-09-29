@@ -1,63 +1,55 @@
 # Swift Quit
 
-Swift Quit quits a macOS app when you close its last window. Close the final Safari window and Safari quits instead of sitting in the Dock doing nothing.
+Swift Quit quits a macOS app when you close its last window. Close the final Safari window and Safari quits instead of sitting in the Dock.
 
-This is a fork of [onebadidea/swiftquit](https://github.com/onebadidea/swiftquit), which has not been updated since 2022 and stopped working on recent macOS releases. Version 2.0 replaces the detection engine, drops every third-party dependency, and no longer asks for Accessibility permission.
+This is a fork of [onebadidea/swiftquit](https://github.com/onebadidea/swiftquit), which hasn't been updated since 2022 and stopped working on recent macOS releases. It has a new detection engine and no third-party dependencies, and it runs on macOS 13 through 27.
 
-## What changed in 2.0
+## Accessibility access
 
-**It works again on macOS 26 and 27.** The old build listened for Accessibility window-destroyed events through [Swindler](https://github.com/tmandry/Swindler). Those events stopped arriving reliably, so nothing quit. Detection now reads the WindowServer directly.
+Swift Quit runs without any permissions, but it only works properly with Accessibility access. Grant it from the settings window, or in System Settings > Privacy & Security > Accessibility. macOS 27 renamed that list to Device Control and Data Access.
 
-**Switching Spaces no longer quits your apps.** This is the trap every other fork fell into. The Accessibility API reports zero windows for any app whose windows are on another Space, so an Accessibility-based build sees "no windows left" every time you swipe between desktops and starts quitting things. Measured on macOS 27 with five apps open: Accessibility reported 0 windows for Visual Studio Code while the WindowServer reported 2, and 1 window for Safari while the WindowServer reported 7.
+The reason is a gap in what macOS reports. When you minimise a window, and when an app like Notes hides its window on close instead of destroying it, the WindowServer reports the same thing: the window exists but isn't ordered in. Only the Accessibility API tells them apart, because it lists minimised windows and skips hidden ones. Without it, Swift Quit has to assume a hidden window might be minimised, which means:
 
-**No Accessibility permission.** The whole install ritual is gone, along with the old rule that you had to remove the previous version from the Accessibility list before upgrading. Swift Quit reads window layout through `CGWindowListCopyWindowInfo`, which returns window owners, layers and visibility to any app without a permission grant. Window titles are the only thing macOS withholds, and Swift Quit never reads them.
+- apps that keep a closed window in memory are never quit. Among Apple's own apps, Notes, Calendar, Activity Monitor, Console and Chess do this.
+- a window minimised before Swift Quit started doesn't keep its app open.
 
-**A delay of 0 is allowed.** The old field rejected it, so the shortest wait was one second. Set it to 0 and the app quits as soon as its last window is gone.
+With access granted, neither applies.
 
-**Pause from the menu bar.** Useful when you are about to do something where an app closing its own window would be inconvenient.
-
-**Apps are matched by bundle identifier, not by file path.** The old list stored absolute paths and compared them after some hand-rolled URL decoding, so an app moved between `/Applications` and `/System/Applications` silently fell off your list. Existing settings are migrated the first time 2.0 runs.
-
-**Zero dependencies.** Swindler, PromiseKit, AXSwift, LaunchAtLogin, Quick and Nimble are all gone. The app is four Swift files and the system frameworks. Launch at login uses `SMAppService`.
-
-The v1.5 app and menu bar artwork is back, replacing the icons from a later pull request.
+macOS ties the permission to the app's signature. A build signed with a Developer ID certificate keeps it through rebuilds and updates, because macOS checks the developer's team rather than the exact binary. An ad hoc build, which is what `./build.sh` makes when your keychain has no Developer ID certificate, loses it on every rebuild: remove Swift Quit from the Accessibility list and add it again.
 
 ## How it decides
 
-Every app keeps windows you never see: a menu bar surface per Space, and parked windows AppKit creates but never shows. Counting an app's windows naively counts those too, so the count never reaches zero and nothing ever quits. Filtering them out by size or position is guesswork that breaks on the next macOS release.
+Swift Quit asks which windows are ordered in on any Space, using `NSWindow.windowNumbers(options: [.allApplications, .allSpaces])`. That list includes covered windows and windows on other desktops, and leaves out the menu bar surfaces and never-shown windows every app keeps. The Accessibility API only reports the current Space, which is why the other forks quit apps as you swipe between desktops. It reported 0 windows for VS Code where the WindowServer reported 2. Here a Space switch changes nothing: four real switches with a 0-second delay quit nothing.
 
-Instead, a window becomes "real" the first time the WindowServer reports it on screen, and stays real until it is destroyed. Minimised windows, occluded windows and windows on other Spaces all keep counting, because they still exist. An app becomes a candidate for quitting when its last real window disappears. After the configured delay, Swift Quit re-reads the window list and only quits if the app is still empty, so reopening a window during the delay cancels the quit.
+When an app's last ordered-in window goes away, the app becomes a candidate. Minimising, hiding and going full screen do this too, since a full-screen transition leaves the app with no ordered-in windows for about half a second. After the close delay Swift Quit checks again, skips hidden apps, and asks Accessibility whether the app still has any window, minimised ones included. If a window comes back during the delay, the pending quit is cancelled and the delay starts over at the next close.
 
-Polling adapts to what you are doing. While you are typing or clicking it checks every 150 ms; after three seconds of no input it drops to once a second. The idle check costs about 50 nanoseconds and the window read about 2 ms, so Swift Quit does nothing measurable while you are away from the machine.
-
-### Known limitation
-
-If you close an app's last window on your current Space while that app has another window on a Space you have not visited since Swift Quit started, the app is quit. Swift Quit has never seen the other window, so it does not know it exists. Visiting that Space once is enough to fix it for the rest of the session. The original Swift Quit had the same blind spot and quit in more situations besides.
+Each check takes about 75 µs, 27 times less than reading the full window list. Swift Quit checks every 0.1 s while you're using the Mac and once a second after 3 s without input. Apps are asked to quit the way Cmd+Q asks them, so unsaved work brings up the usual save dialog. Nothing is force-quit.
 
 ## Install
 
-1. Build the app (see below) or grab it from Releases.
-2. Move `Swift Quit.app` to your Applications folder.
-3. Right-click it and choose Open, then confirm. macOS asks because the app is not signed with a paid Developer ID.
-4. Turn on "Start Swift Quit Automatically" in Settings if you want it running after a restart.
+1. Build it (see below) or download a release.
+2. Move `Swift Quit.app` to Applications.
+3. Open it. A copy you built yourself opens straight away. A notarized release asks once whether to open an app from the internet. A copy that isn't notarized has to be allowed in System Settings > Privacy & Security > Open Anyway.
+4. Grant Accessibility access when asked.
+5. Turn on "Start at login" if you want it running after a restart.
 
-The Homebrew cask `swift-quit` and the downloads on swiftquit.com are the old 1.5 release, not this fork.
+The Homebrew cask `swift-quit` and swiftquit.com still ship the old 1.5.
 
 ## Settings
 
 | Setting | What it does |
 | --- | --- |
-| Start Swift Quit Automatically | Registers a login item through `SMAppService` |
-| Hide App on Startup | Skips the settings window at launch |
-| Display Icon in Menubar | Hides the menu bar icon. Open the app again to get the settings back |
-| Quit apps after (seconds) | Wait between the last window closing and the app quitting. 0 quits immediately |
-| Quit / app list | Either quit everything except the listed apps, or quit only the listed apps |
+| Start at login | Registers a login item with `SMAppService` |
+| Open settings when Swift Quit starts | Shows the settings window at launch. The first launch always shows it |
+| Show menu bar icon | Hides the icon. Open the app again to get the settings back |
+| Quit after | Seconds between the last window closing and the app quitting. 0 quits straight away, but very short delays can catch an app that briefly closes its only window, like an editor reloading |
+| Quit | Quit every app except the listed ones, or only the listed ones |
 
-Finder, Dock, Spotlight, Control Centre, Notification Centre, SystemUIServer, WindowManager and loginwindow are never quit.
+The menu bar menu has a pause switch, and the icon dims while Swift Quit is paused. Finder is never quit.
 
-Swift Quit asks apps to quit the same way the Quit menu item does, so an app with unsaved work shows its save dialog and stays open. Nothing is force-killed.
+Settings live in the `onebadidea.Swift-Quit` defaults domain, the same one 1.5 used, so an existing app list carries over.
 
-To see what it has been doing:
+To see what Swift Quit has quit:
 
 ```
 log show --last 1h --predicate 'subsystem == "onebadidea.Swift-Quit"' --style compact
@@ -65,17 +57,33 @@ log show --last 1h --predicate 'subsystem == "onebadidea.Swift-Quit"' --style co
 
 ## Building
 
-Requires Xcode 15 or later. macOS 13 is the deployment target.
-
 ```
-xcodebuild -project "Swift Quit.xcodeproj" -scheme "Swift Quit" \
-  -configuration Release -destination 'generic/platform=macOS' build
+./build.sh
 ```
 
-The built app lands in the scheme's build products directory. Without `-destination` you get a binary for your own Mac only; with it you get a universal `arm64` and `x86_64` build.
+This puts a universal (Apple silicon and Intel) `dist/Swift Quit.app` in the repo. It needs Xcode 15 or later, and there are no packages to resolve. If your keychain has a Developer ID Application certificate, the app is signed with it. Otherwise it's signed ad hoc.
 
-There is nothing to resolve first. The project has no package dependencies.
+### Notarized releases
+
+```
+./build.sh release
+```
+
+This also sends the app to Apple's notary service, staples the approval to it, and writes `dist/Swift-Quit-<version>.zip` for a GitHub release. The zip is there because the notary service and GitHub both take a single file, and a `.app` is a folder.
+
+It needs a Developer ID Application certificate, which you can create in Xcode > Settings > Accounts > Manage Certificates > + > Developer ID Application. The first run asks for your Apple ID and an app-specific password, made at account.apple.com under Sign-In and Security, and keeps them in the keychain.
+
+## Changes from the original
+
+- Works on macOS 26 and 27. The original listened for Accessibility window events through Swindler, and those stopped arriving.
+- Switching Spaces doesn't quit apps.
+- Apps that hide their window on close, like Notes and Calendar, get quit (with Accessibility access).
+- The delay can be 0.
+- The menu bar menu can pause Swift Quit.
+- Apps are matched by bundle identifier instead of file path, so moving an app doesn't drop it from the list. 1.5 settings migrate on first launch.
+- No dependencies. Swindler, PromiseKit, AXSwift, LaunchAtLogin, Quick and Nimble are gone, launch at login uses `SMAppService`, and the 900-line storyboard is replaced by a small SwiftUI settings form.
+- The v1.5 artwork is back.
 
 ## Credits
 
-Original app by [Johnny Baird](https://github.com/onebadidea). This fork also draws on the work of three others who each fixed part of the problem: [gogoSpace](https://github.com/gogoSpace/swiftquit) for showing that event-based detection had to be replaced with polling, [crushcitycoder](https://github.com/crushcitycoder/swiftquit) for moving window state to the WindowServer and for restoring the v1.5 artwork, and [bampudding](https://github.com/bampudding/swiftquit-tahoe) for the `SMAppService` login item and the wider list of system apps to leave alone.
+Original app by [Johnny Baird](https://github.com/onebadidea). This fork also draws on three others who each fixed part of the problem: [gogoSpace](https://github.com/gogoSpace/swiftquit) for showing that event-based detection had to become polling, [crushcitycoder](https://github.com/crushcitycoder/swiftquit) for moving window state to the WindowServer and for restoring the v1.5 artwork, and [bampudding](https://github.com/bampudding/swiftquit-tahoe) for the `SMAppService` login item.

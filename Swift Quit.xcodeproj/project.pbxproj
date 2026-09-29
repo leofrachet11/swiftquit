@@ -7,24 +7,22 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B2C8BE31283EC5D400DB5C94 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE30283EC5D400DB5C94 /* main.swift */; };
 		B2C8BE1C283EBF8F00DB5C94 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE1B283EBF8F00DB5C94 /* AppDelegate.swift */; };
-		B2C8BE1E283EBF8F00DB5C94 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE1D283EBF8F00DB5C94 /* ViewController.swift */; };
-		B2C8BE20283EBF9100DB5C94 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */; };
-		B2C8BE23283EBF9100DB5C94 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B2C8BE21283EBF9100DB5C94 /* Main.storyboard */; };
-		B2C8BE2B283EC5D400DB5C94 /* WindowWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */; };
 		B2C8BE2F283EC5D400DB5C94 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE2E283EC5D400DB5C94 /* Settings.swift */; };
+		B2C8BE2B283EC5D400DB5C94 /* WindowWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */; };
+		B2C8BE33283EC5D400DB5C94 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE32283EC5D400DB5C94 /* SettingsView.swift */; };
+		B2C8BE20283EBF9100DB5C94 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		B2C8BE18283EBF8E00DB5C94 /* Swift Quit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Swift Quit.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B2C8BE30283EC5D400DB5C94 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		B2C8BE1B283EBF8F00DB5C94 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		B2C8BE1D283EBF8F00DB5C94 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
-		B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B2C8BE22283EBF9100DB5C94 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
-		B2C8BE24283EBF9100DB5C94 /* Swift_Quit.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Swift_Quit.entitlements; sourceTree = "<group>"; };
-		B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowWatcher.swift; sourceTree = "<group>"; };
 		B2C8BE2E283EC5D400DB5C94 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
-		B2C8BE2C283ECF1600DB5C94 /* Swift-Quit-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Swift-Quit-Info.plist"; sourceTree = SOURCE_ROOT; };
+		B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowWatcher.swift; sourceTree = "<group>"; };
+		B2C8BE32283EC5D400DB5C94 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,14 +55,12 @@
 		B2C8BE1A283EBF8E00DB5C94 /* Swift Quit */ = {
 			isa = PBXGroup;
 			children = (
-				B2C8BE2C283ECF1600DB5C94 /* Swift-Quit-Info.plist */,
+				B2C8BE30283EC5D400DB5C94 /* main.swift */,
 				B2C8BE1B283EBF8F00DB5C94 /* AppDelegate.swift */,
 				B2C8BE2E283EC5D400DB5C94 /* Settings.swift */,
 				B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */,
-				B2C8BE1D283EBF8F00DB5C94 /* ViewController.swift */,
+				B2C8BE32283EC5D400DB5C94 /* SettingsView.swift */,
 				B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */,
-				B2C8BE21283EBF9100DB5C94 /* Main.storyboard */,
-				B2C8BE24283EBF9100DB5C94 /* Swift_Quit.entitlements */,
 			);
 			path = "Swift Quit";
 			sourceTree = "<group>";
@@ -128,7 +124,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				B2C8BE20283EBF9100DB5C94 /* Assets.xcassets in Resources */,
-				B2C8BE23283EBF9100DB5C94 /* Main.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,25 +134,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B2C8BE31283EC5D400DB5C94 /* main.swift in Sources */,
+				B2C8BE1C283EBF8F00DB5C94 /* AppDelegate.swift in Sources */,
 				B2C8BE2F283EC5D400DB5C94 /* Settings.swift in Sources */,
 				B2C8BE2B283EC5D400DB5C94 /* WindowWatcher.swift in Sources */,
-				B2C8BE1E283EBF8F00DB5C94 /* ViewController.swift in Sources */,
-				B2C8BE1C283EBF8F00DB5C94 /* AppDelegate.swift in Sources */,
+				B2C8BE33283EC5D400DB5C94 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXVariantGroup section */
-		B2C8BE21283EBF9100DB5C94 /* Main.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				B2C8BE22283EBF9100DB5C94 /* Base */,
-			);
-			name = Main.storyboard;
-			sourceTree = "<group>";
-		};
-/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		B2C8BE25283EBF9100DB5C94 /* Debug */ = {
@@ -274,54 +259,43 @@
 		B2C8BE28283EBF9100DB5C94 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD)";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "Swift Quit/Swift_Quit.entitlements";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Swift-Quit-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "onebadidea.Swift-Quit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
 		B2C8BE29283EBF9100DB5C94 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD)";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "Swift Quit/Swift_Quit.entitlements";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Swift-Quit-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "onebadidea.Swift-Quit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};

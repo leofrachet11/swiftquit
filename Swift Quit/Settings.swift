@@ -9,28 +9,29 @@ import ServiceManagement
 let defaultCloseDelay = 2
 let maximumCloseDelay = 3600
 
-private let closeDelayKey = "SwiftQuit.closeDelay"
-private let menuBarIconVisibleKey = "SwiftQuit.menuBarIconVisible"
-private let launchHiddenKey = "SwiftQuit.launchHidden"
-private let listModeKey = "SwiftQuit.listMode"
-private let listedApplicationsKey = "SwiftQuit.listedApplications"
-private let pausedKey = "SwiftQuit.paused"
-private let migrationCompletedKey = "SwiftQuit.migratedFromVersion1"
+let closeDelayKey = "SwiftQuit.closeDelay"
+let menuBarIconVisibleKey = "SwiftQuit.menuBarIconVisible"
+let launchHiddenKey = "SwiftQuit.launchHidden"
+let listModeKey = "SwiftQuit.listMode"
+let listedApplicationsKey = "SwiftQuit.listedApplications"
+let pausedKey = "SwiftQuit.paused"
+let accessibilityRequestedKey = "SwiftQuit.accessibilityRequested"
 
+private let migrationCompletedKey = "SwiftQuit.migratedFromVersion1"
 private let legacySettingsKey = "SwiftQuitSettings"
 private let legacyApplicationsKey = "SwiftQuitExcludedApps"
-
-private let defaults = UserDefaults.standard
 
 enum ListMode: String {
     case quitAllExceptListed
     case quitOnlyListed
 }
 
-struct ListedApplication: Equatable {
+struct ListedApplication: Identifiable, Equatable {
     let bundleIdentifier: String
     let name: String
     let path: String
+
+    var id: String { bundleIdentifier }
 
     init?(path: String) {
         guard let bundle = Bundle(path: path), let bundleIdentifier = bundle.bundleIdentifier else { return nil }
@@ -58,33 +59,38 @@ struct ListedApplication: Equatable {
 enum Settings {
 
     static var closeDelay: Int {
-        get { return defaults.object(forKey: closeDelayKey) == nil ? defaultCloseDelay : min(max(defaults.integer(forKey: closeDelayKey), 0), maximumCloseDelay) }
-        set { defaults.set(min(max(newValue, 0), maximumCloseDelay), forKey: closeDelayKey) }
+        get { return UserDefaults.standard.object(forKey: closeDelayKey) == nil ? defaultCloseDelay : min(max(UserDefaults.standard.integer(forKey: closeDelayKey), 0), maximumCloseDelay) }
+        set { UserDefaults.standard.set(min(max(newValue, 0), maximumCloseDelay), forKey: closeDelayKey) }
     }
 
     static var menuBarIconVisible: Bool {
-        get { return defaults.object(forKey: menuBarIconVisibleKey) as? Bool ?? true }
-        set { defaults.set(newValue, forKey: menuBarIconVisibleKey) }
+        get { return UserDefaults.standard.object(forKey: menuBarIconVisibleKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: menuBarIconVisibleKey) }
     }
 
     static var launchHidden: Bool {
-        get { return defaults.object(forKey: launchHiddenKey) as? Bool ?? true }
-        set { defaults.set(newValue, forKey: launchHiddenKey) }
+        get { return UserDefaults.standard.object(forKey: launchHiddenKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: launchHiddenKey) }
     }
 
     static var paused: Bool {
-        get { return defaults.bool(forKey: pausedKey) }
-        set { defaults.set(newValue, forKey: pausedKey) }
+        get { return UserDefaults.standard.bool(forKey: pausedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: pausedKey) }
+    }
+
+    static var accessibilityRequested: Bool {
+        get { return UserDefaults.standard.bool(forKey: accessibilityRequestedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: accessibilityRequestedKey) }
     }
 
     static var listMode: ListMode {
-        get { return ListMode(rawValue: defaults.string(forKey: listModeKey) ?? "") ?? .quitAllExceptListed }
-        set { defaults.set(newValue.rawValue, forKey: listModeKey) }
+        get { return ListMode(rawValue: UserDefaults.standard.string(forKey: listModeKey) ?? "") ?? .quitAllExceptListed }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: listModeKey) }
     }
 
     static var listedApplications: [ListedApplication] {
-        get { return (defaults.array(forKey: listedApplicationsKey) as? [[String: String]] ?? []).compactMap(ListedApplication.init(stored:)) }
-        set { defaults.set(newValue.map(\.stored), forKey: listedApplicationsKey) }
+        get { return (UserDefaults.standard.array(forKey: listedApplicationsKey) as? [[String: String]] ?? []).compactMap(ListedApplication.init(stored:)) }
+        set { UserDefaults.standard.set(newValue.map(\.stored), forKey: listedApplicationsKey) }
     }
 
     static var launchAtLogin: Bool {
@@ -92,15 +98,13 @@ enum Settings {
     }
 
     static func setLaunchAtLogin(_ enabled: Bool) throws {
-        let service = SMAppService.mainApp
-
-        guard enabled != (service.status == .enabled) else { return }
+        guard enabled != launchAtLogin else { return }
 
         if enabled {
-            try service.register()
+            try SMAppService.mainApp.register()
         }
         else {
-            try service.unregister()
+            try SMAppService.mainApp.unregister()
         }
     }
 }
@@ -108,6 +112,8 @@ enum Settings {
 // Version 1 kept everything in one [String: String] dictionary and matched apps by absolute
 // path, which broke whenever an app moved between /Applications and /System/Applications.
 func migrateVersionOneSettings() {
+    let defaults = UserDefaults.standard
+
     guard !defaults.bool(forKey: migrationCompletedKey) else { return }
 
     defaults.set(true, forKey: migrationCompletedKey)

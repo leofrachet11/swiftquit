@@ -6,137 +6,175 @@
 import AppKit
 import os
 
-let activePollInterval = 0.15
+let activePollInterval = 0.1
 let idlePollInterval = 1.0
 let userIdleThreshold = 3.0
+let accessibilityTimeout: Float = 1
+let countedWindowLayers = 0 ... 8
 
-let neverQuitBundleIdentifiers: Set<String> = [
-    "com.apple.finder",
-    "com.apple.dock",
-    "com.apple.Spotlight",
-    "com.apple.controlcenter",
-    "com.apple.notificationcenterui",
-    "com.apple.systemuiserver",
-    "com.apple.WindowManager",
-    "com.apple.loginwindow"
-]
+let neverQuitBundleIdentifiers: Set<String> = ["com.apple.finder"]
 
-private let windowListOptions: CGWindowListOption = [.optionAll, .excludeDesktopElements]
 private let anyInputEventType = CGEventType(rawValue: ~0)!
 private let log = Logger(subsystem: "onebadidea.Swift-Quit", category: "windowWatcher")
 
-private let windowNumberKey = kCGWindowNumber as String
-private let windowOwnerKey = kCGWindowOwnerPID as String
-private let windowLayerKey = kCGWindowLayer as String
-private let windowOnScreenKey = kCGWindowIsOnscreen as String
-
 /*
- The WindowServer is the only window source that survives a Space switch. The Accessibility
- API reports zero windows for any app whose windows live on another Space, which is why every
- Accessibility-based build of Swift Quit quits apps as you swipe between desktops.
+ An app counts as having windows while any of its windows is ordered in on any Space, which is
+ what NSWindow.windowNumbers(options: [.allApplications, .allSpaces]) returns. That list survives
+ Space switches and covered windows, and it leaves out the per-Space menu bar surfaces and the
+ parked windows every app keeps but never shows. The Accessibility API only sees the current Space.
 
- CGWindowListCopyWindowInfo lists every window in the session, but that list also carries
- per-Space menu bar surfaces and parked windows an app never shows. A window earns the name
- "real" the first time the WindowServer reports it on screen, and keeps it until the window
- goes away, so minimised windows, occluded windows and windows on other Spaces all still
- count. An app is a candidate for quitting when its last real window disappears.
+ Minimising, hiding, a full-screen transition and closing a window the app keeps in memory
+ (Notes, Calendar, Activity Monitor) all order a window out, and the WindowServer describes them
+ identically. So when an app runs out of ordered-in windows, it is only a candidate. After the
+ close delay, Accessibility settles it: it lists minimised and transitioning windows but not ones
+ the app hid on close. Without Accessibility access, any window that was once ordered in and
+ still exists keeps the app open, because quitting on a minimise would be far worse.
  */
+@MainActor
 enum WindowWatcher {
 
-    private static let queue = DispatchQueue(label: "onebadidea.Swift-Quit.window-watcher", qos: .utility)
-    private static var pollTimer: DispatchSourceTimer?
-    private static var currentPollInterval = 0.0
-    private static var realWindowIdentifiers = Set<CGWindowID>()
-    private static var applicationsWithRealWindows = Set<pid_t>()
-    private static var applicationsAwaitingQuit = Set<pid_t>()
+    private static var windowOwners = [CGWindowID: pid_t]()
+    private static var ignoredWindows = Set<CGWindowID>()
+    private static var previouslyOrderedIn = Set<CGWindowID>()
+    private static var applicationsWithWindows = Set<pid_t>()
+    private static var pendingQuits = [pid_t: Task<Void, Error>]()
+    private static var pollingTask: Task<Void, Error>?
+    private static var sessionActive = true
 
     static func start() {
-        queue.async {
-            guard pollTimer == nil else { return }
+        guard pollingTask == nil else { return }
 
-            let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.setEventHandler(handler: poll)
-            pollTimer = timer
-            schedulePoll(every: activePollInterval)
-            timer.resume()
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+
+        workspaceCenter.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { sessionActive = false }
         }
-    }
+        workspaceCenter.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { sessionActive = true }
+        }
 
-    private static func schedulePoll(every interval: TimeInterval) {
-        guard interval != currentPollInterval, let timer = pollTimer else { return }
+        pollingTask = Task {
+            while true {
+                poll()
 
-        currentPollInterval = interval
-        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(Int(interval * 200)))
+                let idleSeconds = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: anyInputEventType)
+                let interval = idleSeconds > userIdleThreshold ? idlePollInterval : activePollInterval
+                try await Task.sleep(for: .seconds(interval), tolerance: .seconds(interval / 5))
+            }
+        }
     }
 
     private static func poll() {
-        let windows = CGWindowListCopyWindowInfo(windowListOptions, kCGNullWindowID) as? [[String: Any]] ?? []
+        guard sessionActive else { return }
 
-        var ownerByWindow = [CGWindowID: pid_t](minimumCapacity: windows.count)
+        let orderedIn = orderedInWindows()
 
-        for window in windows {
-            guard (window[windowLayerKey] as? NSNumber)?.intValue == 0,
-                  let identifier = (window[windowNumberKey] as? NSNumber)?.uint32Value,
-                  let owner = (window[windowOwnerKey] as? NSNumber)?.int32Value else { continue }
+        // Only an unavailable WindowServer returns nothing; reading that as "every window
+        // closed" would quit every app at once.
+        guard !orderedIn.isEmpty else { return }
 
-            ownerByWindow[identifier] = owner
+        let occupied = owners(of: orderedIn)
+        let emptied = applicationsWithWindows.subtracting(occupied)
+        applicationsWithWindows = occupied
 
-            if (window[windowOnScreenKey] as? NSNumber)?.boolValue == true {
-                realWindowIdentifiers.insert(identifier)
+        for processIdentifier in occupied where pendingQuits[processIdentifier] != nil {
+            pendingQuits.removeValue(forKey: processIdentifier)?.cancel()
+        }
+
+        let orderedInSet = Set(orderedIn)
+
+        if orderedInSet != previouslyOrderedIn {
+            forgetDestroyedWindows(orderedIn: orderedInSet)
+            previouslyOrderedIn = orderedInSet
+        }
+
+        guard !Settings.paused else { return }
+
+        emptied.forEach(scheduleQuit)
+    }
+
+    private static func owners(of identifiers: [CGWindowID]) -> Set<pid_t> {
+        let unknown = identifiers.filter { windowOwners[$0] == nil && !ignoredWindows.contains($0) }
+
+        for window in describe(unknown) {
+            guard let identifier = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value else { continue }
+
+            let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
+            let owner = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+
+            if let owner, countedWindowLayers.contains(layer) {
+                windowOwners[identifier] = owner
+            }
+            else {
+                ignoredWindows.insert(identifier)
             }
         }
 
-        realWindowIdentifiers.formIntersection(ownerByWindow.keys)
+        return Set(identifiers.compactMap { windowOwners[$0] })
+    }
 
-        var occupied = Set<pid_t>(minimumCapacity: applicationsWithRealWindows.count)
+    // Ordered-out windows stay known until they are destroyed, since without Accessibility they
+    // are the only evidence of a minimised window.
+    private static func forgetDestroyedWindows(orderedIn: Set<CGWindowID>) {
+        ignoredWindows.formIntersection(orderedIn)
 
-        for identifier in realWindowIdentifiers {
-            occupied.insert(ownerByWindow[identifier]!)
+        let orderedOut = windowOwners.keys.filter { !orderedIn.contains($0) }
+        let surviving = Set(describe(orderedOut).compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+
+        for identifier in orderedOut where !surviving.contains(identifier) {
+            windowOwners[identifier] = nil
         }
-
-        let emptied = applicationsWithRealWindows.subtracting(occupied)
-        applicationsWithRealWindows = occupied
-
-        if !Settings.paused {
-            emptied.forEach(scheduleQuit)
-        }
-
-        let idleSeconds = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: anyInputEventType)
-        schedulePoll(every: idleSeconds > userIdleThreshold ? idlePollInterval : activePollInterval)
     }
 
     private static func scheduleQuit(of processIdentifier: pid_t) {
-        guard !applicationsAwaitingQuit.contains(processIdentifier),
+        guard pendingQuits[processIdentifier] == nil,
               let application = NSRunningApplication(processIdentifier: processIdentifier),
               shouldQuit(application) else { return }
 
-        applicationsAwaitingQuit.insert(processIdentifier)
+        // Cancelled by poll() if a window comes back, so the app has to stay windowless for the whole delay.
+        pendingQuits[processIdentifier] = Task {
+            try await Task.sleep(for: .seconds(Settings.closeDelay))
 
-        queue.asyncAfter(deadline: .now() + .milliseconds(Settings.closeDelay * 1000)) {
-            applicationsAwaitingQuit.remove(processIdentifier)
+            pendingQuits[processIdentifier] = nil
 
-            guard !application.isTerminated, !Settings.paused, !hasRealWindow(processIdentifier) else { return }
+            guard sessionActive, !Settings.paused, !application.isTerminated, !application.isHidden, !hasWindows(application) else { return }
 
-            DispatchQueue.main.async { quit(application) }
+            log.notice("Quitting \(application.localizedName ?? application.bundleIdentifier ?? "unnamed", privacy: .public)")
+            application.terminate()
         }
     }
 
-    // Re-read the window list rather than trust the last poll, so a window reopened during the
-    // close delay cancels the quit even when the delay is zero.
-    private static func hasRealWindow(_ processIdentifier: pid_t) -> Bool {
-        let windows = CGWindowListCopyWindowInfo(windowListOptions, kCGNullWindowID) as? [[String: Any]] ?? []
+    private static func hasWindows(_ application: NSRunningApplication) -> Bool {
+        let processIdentifier = application.processIdentifier
+        let orderedIn = orderedInWindows()
 
-        for window in windows {
-            guard (window[windowOwnerKey] as? NSNumber)?.int32Value == processIdentifier,
-                  (window[windowLayerKey] as? NSNumber)?.intValue == 0,
-                  let identifier = (window[windowNumberKey] as? NSNumber)?.uint32Value else { continue }
+        guard !orderedIn.isEmpty, !owners(of: orderedIn).contains(processIdentifier) else { return true }
 
-            if realWindowIdentifiers.contains(identifier) || (window[windowOnScreenKey] as? NSNumber)?.boolValue == true {
-                return true
-            }
+        if AXIsProcessTrusted(), let count = accessibilityWindowCount(processIdentifier) {
+            return count > 0
         }
 
-        return false
+        let known = windowOwners.filter { $0.value == processIdentifier }.map(\.key)
+
+        return !describe(known).isEmpty
+    }
+
+    // Returns nil when the app doesn't answer, so a busy app falls back to the WindowServer rule
+    // instead of being quit on a guess.
+    private static func accessibilityWindowCount(_ processIdentifier: pid_t) -> Int? {
+        let element = AXUIElementCreateApplication(processIdentifier)
+        AXUIElementSetMessagingTimeout(element, accessibilityTimeout)
+
+        var windows: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windows)
+
+        if result == .noValue {
+            return 0
+        }
+
+        guard result == .success else { return nil }
+
+        return (windows as? [AXUIElement])?.count ?? 0
     }
 
     private static func shouldQuit(_ application: NSRunningApplication) -> Bool {
@@ -151,8 +189,17 @@ enum WindowWatcher {
         return Settings.listMode == .quitOnlyListed ? isListed : !isListed
     }
 
-    private static func quit(_ application: NSRunningApplication) {
-        log.notice("Quitting \(application.localizedName ?? application.bundleIdentifier ?? "unnamed", privacy: .public)")
-        application.terminate()
+    private static func orderedInWindows() -> [CGWindowID] {
+        return (NSWindow.windowNumbers(options: [.allApplications, .allSpaces]) ?? []).map { CGWindowID($0.intValue) }
+    }
+
+    private static func describe(_ identifiers: [CGWindowID]) -> [[String: Any]] {
+        guard !identifiers.isEmpty else { return [] }
+
+        // The array has to hold raw window IDs, not CFNumbers.
+        var values = identifiers.map { UnsafeRawPointer(bitPattern: UInt($0)) }
+        let array = CFArrayCreate(nil, &values, values.count, nil)
+
+        return CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] ?? []
     }
 }

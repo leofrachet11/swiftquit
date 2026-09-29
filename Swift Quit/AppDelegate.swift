@@ -5,30 +5,39 @@
 //  Created by Johnny Baird on 5/25/22.
 //
 
-import Cocoa
+import AppKit
+import SwiftUI
 
-@main
-class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
-    private lazy var settingsWindowController = NSStoryboard(name: "Main", bundle: nil).instantiateController(withIdentifier: "settings") as! NSWindowController
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateVersionOneSettings()
+        NSApp.mainMenu = makeMainMenu()
         WindowWatcher.start()
 
         if Settings.menuBarIconVisible {
-            showStatusItem()
+            setStatusItemVisible(true)
         }
 
-        if !Settings.launchHidden {
+        let firstLaunch = !Settings.accessibilityRequested
+
+        if firstLaunch || !Settings.launchHidden {
             openSettings()
+        }
+
+        if firstLaunch {
+            Settings.accessibilityRequested = true
+            requestAccessibility()
         }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        guard settingsWindowController.window?.isVisible != true else { return }
+        guard settingsWindow?.isVisible != true else { return }
 
         openSettings()
     }
@@ -41,18 +50,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    func applicationSupportsSecureRestorableState(_ application: NSApplication) -> Bool {
-        return true
-    }
-
     @objc func openSettings() {
-        settingsWindowController.showWindow(self)
+        if settingsWindow == nil {
+            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+            window.title = "Swift Quit"
+            window.styleMask = [.titled, .closable]
+            window.delegate = self
+            window.center()
+            settingsWindow = window
+        }
+
+        settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func showStatusItem() {
-        guard statusItem == nil else {
-            statusItem?.isVisible = true
+    // Dropping the window hands SwiftUI's memory back, and hiding returns focus to the
+    // previous app instead of leaving a windowless Swift Quit in front.
+    func windowWillClose(_ notification: Notification) {
+        settingsWindow = nil
+        NSApp.hide(nil)
+    }
+
+    // kAXTrustedCheckOptionPrompt is a mutable C global that Swift 6 refuses to read; this is its value.
+    func requestAccessibility() {
+        AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+    }
+
+    func setStatusItemVisible(_ visible: Bool) {
+        guard visible else {
+            statusItem?.isVisible = false
+            return
+        }
+
+        if let statusItem {
+            statusItem.isVisible = true
             return
         }
 
@@ -60,13 +91,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(named: "MenuIcon")
         item.button?.image?.size = NSSize(width: 18, height: 18)
         item.button?.image?.isTemplate = true
+        item.button?.appearsDisabled = Settings.paused
 
         let pause = NSMenuItem(title: "Pause Swift Quit", action: #selector(togglePause), keyEquivalent: "")
-        pause.state = Settings.paused ? .on : .off
         pause.target = self
+        pause.state = Settings.paused ? .on : .off
         pauseItem = pause
 
-        let settings = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
 
         let menu = NSMenu()
@@ -79,16 +111,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    func hideStatusItem() {
-        statusItem?.isVisible = false
-    }
-
     @objc private func togglePause() {
         Settings.paused.toggle()
         pauseItem?.state = Settings.paused ? .on : .off
+        statusItem?.button?.appearsDisabled = Settings.paused
     }
-}
 
-var appDelegate: AppDelegate {
-    return NSApp.delegate as! AppDelegate
+    // Never shown for a menu bar app, but its key equivalents are what make Cmd+Q, Cmd+W and
+    // copy and paste work while the settings window is focused.
+    private func makeMainMenu() -> NSMenu {
+        let applicationMenu = NSMenu()
+        applicationMenu.addItem(withTitle: "Quit Swift Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
+        let mainMenu = NSMenu()
+
+        for submenu in [applicationMenu, editMenu, windowMenu] {
+            mainMenu.addItem(withTitle: submenu.title, action: nil, keyEquivalent: "").submenu = submenu
+        }
+
+        return mainMenu
+    }
 }
