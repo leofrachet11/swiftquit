@@ -13,7 +13,7 @@ The reason is a gap in what macOS reports. When you minimise a window, and when 
 - apps that keep a closed window in memory are never quit. Among Apple's own apps, Notes, Calendar, Activity Monitor, Console and Chess do this.
 - a window minimised before Swift Quit started doesn't keep its app open.
 
-With access granted, neither applies.
+With access granted, neither applies. Accessibility is also the only way Swift Quit can see menu bar icons, which it uses to leave apps like VPNs running (see below).
 
 macOS ties the permission to the app's signature. A build signed with a Developer ID certificate keeps it through rebuilds and updates, because macOS checks the developer's team rather than the exact binary. An ad hoc build, which is what `./build.sh` makes when your keychain has no Developer ID certificate, loses it on every rebuild: remove Swift Quit from the Accessibility list and add it again.
 
@@ -24,6 +24,19 @@ Swift Quit asks which windows are ordered in on any Space, using `NSWindow.windo
 When an app's last ordered-in window goes away, the app becomes a candidate. Minimising, hiding and going full screen do this too, since a full-screen transition leaves the app with no ordered-in windows for about half a second. After the close delay Swift Quit checks again, skips hidden apps, and asks Accessibility whether the app still has any window, minimised ones included. If a window comes back during the delay, the pending quit is cancelled and the delay starts over at the next close.
 
 Each check takes about 75 µs, 27 times less than reading the full window list. Swift Quit checks every 0.1 s while you're using the Mac and once a second after 3 s without input. Apps are asked to quit the way Cmd+Q asks them, so unsaved work brings up the usual save dialog. Nothing is force-quit.
+
+## Apps that should keep running
+
+Some apps are meant to carry on without a window, like a VPN or a music player. Before quitting an app, Swift Quit looks for signs of one and leaves the app running if it finds any:
+
+- It's a background app. Apps like NordVPN declare themselves menu bar apps and only take a Dock icon when you ask for one.
+- It has a menu bar icon, like Happ, Docker and most VPNs. macOS 27 keeps menu bar icons out of the window list, so this needs Accessibility access.
+- It's playing or recording audio, such as music, a podcast or a call. Sound from an app's helper processes counts, including the shared process that WebKit apps play through. This needs macOS 14.2 or later.
+- It's keeping the Mac awake, as apps do during downloads, exports, encodes and calls.
+
+These checks only run for an app that's about to be quit, so they cost nothing while Swift Quit watches windows. The log says which one kept an app open. Under "Only these apps", the apps you list are quit even if they live in the menu bar, but not while they're busy. Your list and the app's own Dock status are checked again when the delay ends, so adding an app during the delay still saves it.
+
+That leaves your list for apps that keep working without a window and show none of these signs: a chat or mail app you keep open for notifications, a paused player you resume with the media keys, a timer, or a sync or download app that doesn't keep the Mac awake.
 
 ## Install
 
@@ -40,7 +53,6 @@ The Homebrew cask `swift-quit` and swiftquit.com still ship the old 1.5.
 | Setting | What it does |
 | --- | --- |
 | Start at login | Registers a login item with `SMAppService` |
-| Open settings when Swift Quit starts | Shows the settings window at launch. The first launch always shows it |
 | Show menu bar icon | Hides the icon. Open the app again to get the settings back |
 | Quit after | Seconds between the last window closing and the app quitting. 0 quits straight away, but very short delays can catch an app that briefly closes its only window, like an editor reloading |
 | Quit | Quit every app except the listed ones, or only the listed ones |
@@ -49,7 +61,7 @@ The menu bar menu has a pause switch, and the icon dims while Swift Quit is paus
 
 Settings live in the `onebadidea.Swift-Quit` defaults domain, the same one 1.5 used, so an existing app list carries over.
 
-To see what Swift Quit has quit:
+To see what Swift Quit has quit or kept running, and why:
 
 ```
 log show --last 1h --predicate 'subsystem == "onebadidea.Swift-Quit"' --style compact
@@ -78,6 +90,7 @@ It needs a Developer ID Application certificate, which you can create in Xcode >
 - Works on macOS 26 and 27. The original listened for Accessibility window events through Swindler, and those stopped arriving.
 - Switching Spaces doesn't quit apps.
 - Apps that hide their window on close, like Notes and Calendar, get quit (with Accessibility access).
+- Apps meant to run without a window, like VPNs, music players and calls, are left running.
 - The delay can be 0.
 - The menu bar menu can pause Swift Quit.
 - Apps are matched by bundle identifier instead of file path, so moving an app doesn't drop it from the list. 1.5 settings migrate on first launch.

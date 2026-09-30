@@ -11,7 +11,6 @@ private let accessibilitySettingName = ProcessInfo.processInfo.operatingSystemVe
 
 struct SettingsView: View {
 
-    @AppStorage(launchHiddenKey) private var launchHidden = true
     @AppStorage(closeDelayKey) private var closeDelay = defaultCloseDelay
     @AppStorage(listModeKey) private var listMode = ListMode.quitAllExceptListed
 
@@ -51,14 +50,13 @@ struct SettingsView: View {
                 }
             } footer: {
                 Text(accessibilityGranted
-                     ? "Swift Quit can tell a minimised window from one an app hides when you close it."
-                     : "Without it, apps that keep a closed window in memory (Notes, Calendar, Activity Monitor) are never quit, and windows minimised before Swift Quit started don't keep their app open.")
+                     ? "Swift Quit can tell a minimised window from one an app hides when you close it, and see which apps live in the menu bar."
+                     : "Without it, Swift Quit can't see menu bar icons, so apps that live there, like most VPNs, can be quit. Apps that keep a closed window in memory (Notes, Calendar, Activity Monitor) are never quit, and windows minimised before Swift Quit started don't keep their app open.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
                 Toggle("Start at login", isOn: Binding(get: { launchAtLogin }, set: changeLaunchAtLogin))
-                Toggle("Open settings when Swift Quit starts", isOn: Binding(get: { !launchHidden }, set: { launchHidden = !$0 }))
                 Toggle("Show menu bar icon", isOn: Binding(get: { menuBarIconVisible }, set: changeMenuBarIcon))
             } footer: {
                 if !menuBarIconVisible {
@@ -109,8 +107,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .scrollDisabled(true)
+        .modifier(ScrollsOnlyWhenOverflowing())
         .frame(width: 440)
+        .frame(maxHeight: maximumHeight)
         .fixedSize()
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             accessibilityGranted = AXIsProcessTrusted()
@@ -121,6 +120,11 @@ struct SettingsView: View {
         } message: {
             Text("\(loginItemError ?? "")\n\nSwift Quit usually has to be in your Applications folder before it can start at login.")
         }
+    }
+
+    // A long app list would push the window past the bottom of the screen, so the form scrolls instead.
+    private var maximumHeight: CGFloat {
+        return (NSScreen.main?.visibleFrame.height ?? .infinity) - 60
     }
 
     private func changeLaunchAtLogin(_ enabled: Bool) {
@@ -155,5 +159,24 @@ struct SettingsView: View {
 
         listedApplications.append(contentsOf: additions)
         Settings.listedApplications = listedApplications
+    }
+}
+
+// With "Always show scroll bars" on, a scrollable form draws a bar even when everything fits.
+// macOS 15 reports whether the content overflows; earlier versions just keep scrolling on.
+// Fractional layout can leave the content half a point taller than the window, hence the point of slack.
+private struct ScrollsOnlyWhenOverflowing: ViewModifier {
+
+    @State private var overflowing = false
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content
+                .scrollDisabled(!overflowing)
+                .onScrollGeometryChange(for: Bool.self) { $0.contentSize.height - $0.containerSize.height > 1 } action: { overflowing = $1 }
+        }
+        else {
+            content
+        }
     }
 }

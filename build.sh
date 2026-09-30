@@ -30,8 +30,9 @@ if [[ $mode == release ]]; then
     timestamp="--timestamp"
 fi
 
+# Cleaning first keeps files a newer build no longer makes from lingering in the app.
 xcodebuild -project "Swift Quit.xcodeproj" -scheme "Swift Quit" -configuration Release \
-    -destination 'generic/platform=macOS' -derivedDataPath build -quiet build
+    -destination 'generic/platform=macOS' -derivedDataPath build -quiet clean build
 
 rm -rf dist
 mkdir dist

@@ -137,9 +137,18 @@ enum WindowWatcher {
 
             pendingQuits[processIdentifier] = nil
 
-            guard sessionActive, !Settings.paused, !application.isTerminated, !application.isHidden, !hasWindows(application) else { return }
+            // The list, or the app's own Dock presence, can change during the delay.
+            guard sessionActive, !Settings.paused, !application.isTerminated, !application.isHidden, shouldQuit(application), !hasWindows(application) else { return }
 
-            log.notice("Quitting \(application.localizedName ?? application.bundleIdentifier ?? "unnamed", privacy: .public)")
+            let name = application.localizedName ?? application.bundleIdentifier ?? "unnamed"
+
+            if let reason = KeepRunning.reason(for: application) {
+                log.notice("Keeping \(name, privacy: .public) running because \(reason, privacy: .public)")
+                return
+            }
+
+            log.notice("Quitting \(name, privacy: .public)")
+
             application.terminate()
         }
     }

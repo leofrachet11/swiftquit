@@ -11,7 +11,6 @@ let maximumCloseDelay = 3600
 
 let closeDelayKey = "SwiftQuit.closeDelay"
 let menuBarIconVisibleKey = "SwiftQuit.menuBarIconVisible"
-let launchHiddenKey = "SwiftQuit.launchHidden"
 let listModeKey = "SwiftQuit.listMode"
 let listedApplicationsKey = "SwiftQuit.listedApplications"
 let pausedKey = "SwiftQuit.paused"
@@ -68,11 +67,6 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: menuBarIconVisibleKey) }
     }
 
-    static var launchHidden: Bool {
-        get { return UserDefaults.standard.object(forKey: launchHiddenKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: launchHiddenKey) }
-    }
-
     static var paused: Bool {
         get { return UserDefaults.standard.bool(forKey: pausedKey) }
         set { UserDefaults.standard.set(newValue, forKey: pausedKey) }
@@ -121,7 +115,6 @@ func migrateVersionOneSettings() {
     if let legacy = defaults.dictionary(forKey: legacySettingsKey) as? [String: String] {
         Settings.closeDelay = Int(legacy["closeDelay"] ?? "") ?? defaultCloseDelay
         Settings.menuBarIconVisible = legacy["menubarIconEnabled"] != "false"
-        Settings.launchHidden = legacy["launchHidden"] != "false"
         Settings.listMode = legacy["excludeBehaviour"] == "includeApps" ? .quitOnlyListed : .quitAllExceptListed
     }
 

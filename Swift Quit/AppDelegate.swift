@@ -24,16 +24,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             setStatusItemVisible(true)
         }
 
-        let firstLaunch = !Settings.accessibilityRequested
+        // Starting at login stays out of the way, while opening the app by hand shows its settings.
+        let launchedAtLogin = NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
 
-        if firstLaunch || !Settings.launchHidden {
+        if !launchedAtLogin || !Settings.accessibilityRequested {
             openSettings()
         }
 
-        if firstLaunch {
-            Settings.accessibilityRequested = true
-            requestAccessibility()
-        }
+        guard !Settings.accessibilityRequested else { return }
+
+        Settings.accessibilityRequested = true
+        requestAccessibility()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
