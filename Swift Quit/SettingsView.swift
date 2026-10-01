@@ -101,9 +101,6 @@ struct SettingsView: View {
                 }
 
                 Button("Add App…", action: addApplications)
-            } footer: {
-                Text("0 seconds quits straight away. Very short delays can catch apps that briefly close their only window, such as an editor reloading.")
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

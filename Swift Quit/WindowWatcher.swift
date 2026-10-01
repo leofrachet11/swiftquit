@@ -23,8 +23,6 @@ let hiddenWindowRecheckInterval = 1.0
 // When an app empties itself (a splash screen handing over, a sign-in window closing), it gets at
 // least this long to open its next window before it's quit.
 let appClosedWindowGrace = 3.0
-// An app this new is still arranging its windows, whoever closed them.
-let recentlyLaunchedPeriod = 30.0
 // A click or key press this long before the windows vanished means the user closed them.
 let userCloseLeeway = 1.0
 
@@ -52,6 +50,7 @@ private let log = Logger(subsystem: "onebadidea.Swift-Quit", category: "windowWa
 enum WindowWatcher {
 
     private static var windowOwners = [CGWindowID: pid_t]()
+    private static var windowAppearances = [CGWindowID: Date]()
     // The helper process behind a window that counts for its app, like Steam's.
     private static var helperWindowOwners = [CGWindowID: pid_t]()
     private static var ignoredWindows = Set<CGWindowID>()
@@ -105,20 +104,21 @@ enum WindowWatcher {
             pendingQuits.removeValue(forKey: processIdentifier)?.cancel()
         }
 
+        let windowsLastSeen = lastPollTime
+        lastPollTime = pollTime
+
+        // Before destroyed windows are forgotten, since when they appeared tells who closed them.
+        if !Settings.paused {
+            for processIdentifier in emptied {
+                scheduleQuit(of: processIdentifier, windowsLastSeen: windowsLastSeen)
+            }
+        }
+
         let orderedInSet = Set(orderedIn)
 
         if orderedInSet != previouslyOrderedIn {
             forgetDestroyedWindows(orderedIn: orderedInSet)
             previouslyOrderedIn = orderedInSet
-        }
-
-        let windowsLastSeen = lastPollTime
-        lastPollTime = pollTime
-
-        guard !Settings.paused else { return }
-
-        for processIdentifier in emptied {
-            scheduleQuit(of: processIdentifier, windowsLastSeen: windowsLastSeen)
         }
     }
 
@@ -147,6 +147,7 @@ enum WindowWatcher {
                     let countedOwner = application(drawingFrom: owner)
 
                     windowOwners[identifier] = countedOwner
+                    windowAppearances[identifier] = Date()
                     helperWindowOwners[identifier] = countedOwner == owner ? nil : owner
                     hiddenWindows.remove(identifier)
                 }
@@ -202,6 +203,7 @@ enum WindowWatcher {
 
         for identifier in orderedOut where !surviving.contains(identifier) {
             windowOwners[identifier] = nil
+            windowAppearances[identifier] = nil
             helperWindowOwners[identifier] = nil
         }
     }
@@ -212,7 +214,7 @@ enum WindowWatcher {
               shouldQuit(application) else { return }
 
         let closeDelay = Double(Settings.closeDelay)
-        let delay = closedByUser(application, processIdentifier: processIdentifier, windowsLastSeen: windowsLastSeen) ? closeDelay : max(closeDelay, appClosedWindowGrace)
+        let delay = closedByUser(processIdentifier, windowsLastSeen: windowsLastSeen) ? closeDelay : max(closeDelay, appClosedWindowGrace)
 
         // Cancelled by poll() if a window comes back, so the app has to stay windowless for the whole delay.
         pendingQuits[processIdentifier] = Task {
@@ -236,20 +238,24 @@ enum WindowWatcher {
         }
     }
 
+    // A close the user made follows a click, or a key press in that app (a background window's red
+    // button works without switching to it), after the window appeared and just before it went.
     // Splash screens and sign-in windows hand over to the next window on their own, sometimes with a
-    // gap. A close the user made follows a click, or a key press in that app (a background window's
-    // red button works without switching to it), and macOS reports both without any permission.
-    // Anything else gets the grace period.
-    private static func closedByUser(_ application: NSRunningApplication, processIdentifier: pid_t, windowsLastSeen: Date) -> Bool {
-        if let launchDate = application.launchDate, Date().timeIntervalSince(launchDate) < recentlyLaunchedPeriod {
-            return false
+    // gap, and the click that opened the app came before its first window did. macOS reports how
+    // long ago the last click and key press were without any permission.
+    private static func closedByUser(_ processIdentifier: pid_t, windowsLastSeen: Date) -> Bool {
+        var lastWindowAppeared = Date.distantPast
+
+        for (window, owner) in windowOwners where owner == processIdentifier {
+            lastWindowAppeared = max(lastWindowAppeared, windowAppearances[window] ?? .distantPast)
         }
 
         let clickAge = clickEventTypes.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
         let isFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == processIdentifier
         let keyAge = isFrontmost ? CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown) : .infinity
+        let inputAge = min(clickAge, keyAge)
 
-        return min(clickAge, keyAge) <= Date().timeIntervalSince(windowsLastSeen) + userCloseLeeway
+        return inputAge <= Date().timeIntervalSince(windowsLastSeen) + userCloseLeeway && inputAge < Date().timeIntervalSince(lastWindowAppeared)
     }
 
     // Takes the window owner's process id, since Steam's NSRunningApplication reports -1 as its own.
