@@ -24,14 +24,20 @@ private struct CoalitionInfo {
     var reserved = (UInt64(0), UInt64(0), UInt64(0))
 }
 
-// LaunchServices remembers which app launched which, even after the launcher has quit. The functions
-// that read it are private, so they're looked up at runtime. The -2s are RTLD_DEFAULT and the current
-// login session.
-private typealias CopyRunningApplications = @convention(c) (Int32) -> Unmanaged<CFArray>?
+// LaunchServices keeps a record of what a quit app left running, which is what the Dock reads. The
+// functions that read it are private, so they're looked up at runtime. The -2s are RTLD_DEFAULT and
+// the current login session.
+private typealias CreateApplicationSerialNumber = @convention(c) (CFAllocator?, pid_t) -> Unmanaged<CFTypeRef>?
 private typealias CopyApplicationInformation = @convention(c) (Int32, CFTypeRef, CFArray?) -> Unmanaged<CFDictionary>?
-private let copyRunningApplications = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_LSCopyRunningApplicationArray").map { unsafeBitCast($0, to: CopyRunningApplications.self) }
+private let createApplicationSerialNumber = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_LSASNCreateWithPid").map { unsafeBitCast($0, to: CreateApplicationSerialNumber.self) }
 private let copyApplicationInformation = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_LSCopyApplicationInformation").map { unsafeBitCast($0, to: CopyApplicationInformation.self) }
 private let currentSession: Int32 = -2
+
+private let coalitionProcessesKey = "LSApplicationCoalitionPIDsKey"
+private let launchedApplicationsKey = "LSApplicationChildApplicationASNsArrayKey"
+private let inheritedApplicationsKey = "LSApplicationRelatedApplicationASNsArrayKey"
+private let inheritedCoalitionsKey = "LSApplicationRelatedCoalitionsIDsArrayKey"
+private let recordKeys = [coalitionProcessesKey, launchedApplicationsKey, inheritedApplicationsKey, inheritedCoalitionsKey, "LSLaunchTime", "ApplicationType", "pid"]
 
 // The kernel counts CPU time in Mach ticks, which aren't nanoseconds on Apple silicon.
 private let secondsPerMachTick: Double = {
@@ -40,65 +46,33 @@ private let secondsPerMachTick: Double = {
     return Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
 }()
 
-// A quit app, and the coalitions its leftovers can be in.
-private struct QuitInstance {
-    let processIdentifier: pid_t
-    let startDate: Date
-    var coalitions: Set<UInt64>
-}
-
 /*
- macOS shows a quit app as "Running in Background" while any process in its coalition (the helpers
- it started itself) or any background-only app it launched is still running, and the Dock's "Stop
- Running in Background" sends those processes the terminate signal. Photoshop leaves Adobe's IPC
- broker and Creative Cloud's content manager behind like this, however it's quit. So once an app
- Swift Quit looks after has quit and its helpers have had a moment to exit, Swift Quit does what that
- menu item does, but only to helpers signed by the app's own developer that started after the app,
- have no windows or menu bar icon, and are idle rather than playing audio, keeping the Mac awake or
- working. The apps built into macOS carry no developer team, so they're left alone, and so are
- programs started from a terminal, which the terminal's developer didn't sign.
+ macOS shows a quit app as "Running in Background" while processes are left in its coalition (the
+ helpers it started itself) or background-only apps it launched are still running, and the Dock's
+ "Stop Running in Background" sends those the terminate signal. Photoshop leaves Adobe's IPC broker
+ and Creative Cloud's content manager behind like this, however it's quit. Reopening an app hands
+ its predecessor's leftovers to the new copy. So once an app Swift Quit looks after has quit and its
+ helpers have had a moment to exit, Swift Quit reads LaunchServices' list of what's left and does
+ what that menu item does. It only stops helpers signed by the app's own developer that have no
+ windows or menu bar icon, and only once all of them are idle rather than playing audio, keeping
+ the Mac awake or working. The apps built into macOS carry no developer team, so they're left
+ alone, and so are programs started from a terminal, which the terminal's developer didn't sign.
  */
 @MainActor
 enum LeftoverHelpers {
 
-    // Read while each app runs, since neither can be looked up once the app has gone.
-    private static var coalitions = [pid_t: UInt64]()
-    private static var startDates = [pid_t: Date]()
-    // Quit apps whose helpers were left because the app was opened again, retried at its next quit.
-    private static var reopenedInstances = [String: [QuitInstance]]()
-
     static func start() {
-        for application in NSWorkspace.shared.runningApplications {
-            remember(application)
-        }
-
-        let workspaceCenter = NSWorkspace.shared.notificationCenter
-
-        workspaceCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { notification in
-            guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-
-            MainActor.assumeIsolated { remember(application) }
-        }
-        workspaceCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { notification in
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { notification in
             guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
 
             MainActor.assumeIsolated { stopHelpers(of: application) }
         }
     }
 
-    private static func remember(_ application: NSRunningApplication) {
-        let processIdentifier = application.processIdentifier
-
-        coalitions[processIdentifier] = coalition(of: processIdentifier)
-        startDates[processIdentifier] = startDate(of: processIdentifier)
-    }
-
     private static func stopHelpers(of application: NSRunningApplication) {
         let processIdentifier = application.processIdentifier
-        let appCoalition = coalitions.removeValue(forKey: processIdentifier)
-        let appStartDate = startDates.removeValue(forKey: processIdentifier)
 
-        guard let appCoalition, let appStartDate,
+        guard processIdentifier > 0,
               !Settings.paused,
               application.activationPolicy == .regular,
               WindowWatcher.manages(application),
@@ -107,40 +81,21 @@ enum LeftoverHelpers {
               let team = application.bundleURL.flatMap(teamIdentifier(ofBundleAt:)) else { return }
 
         let name = application.localizedName ?? bundleIdentifier
-        let quitInstances = [QuitInstance(processIdentifier: processIdentifier, startDate: appStartDate, coalitions: [appCoalition])] + (reopenedInstances.removeValue(forKey: bundleIdentifier) ?? [])
 
         _ = Task {
-            var instances = quitInstances
             var teams = [pid_t: String]()
             var stopped = Set<pid_t>()
 
-            // The app's helpers are still exiting now, so this first look only reads how much CPU its
-            // coalition has used, which takes a fraction of a millisecond.
-            var previousCPUTimes = Dictionary(uniqueKeysWithValues: instances.flatMap(coalitionMembers).map { ($0, cpuTime(of: $0)) })
+            // The app's helpers are still exiting now, so this first look only reads their CPU time.
+            var previousCPUTimes = Dictionary(uniqueKeysWithValues: Set(leftovers(of: processIdentifier)).map { ($0, cpuTime(of: $0)) })
 
             for _ in 0 ..< helperChecks {
                 try await Task.sleep(for: .seconds(helperExitGrace))
 
-                guard !Settings.paused else { return }
+                // An app opened again takes over what the last copy left, until it quits too.
+                guard !Settings.paused, NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty else { return }
 
-                // Opening the app again can put its helpers back to work, so they wait for its next quit.
-                guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty else {
-                    reopenedInstances[bundleIdentifier, default: []] += instances
-                    return
-                }
-
-                var helpers = Set<pid_t>()
-
-                for index in instances.indices {
-                    let launched = launchedBackgroundApps(of: instances[index].processIdentifier)
-
-                    // A launched helper's record goes when it quits, but helpers it started itself stay
-                    // in its coalition and keep the app in the Dock.
-                    instances[index].coalitions.formUnion(launched.compactMap(coalition(of:)))
-                    helpers.formUnion(leftovers(of: instances[index], launched: launched, team: team, teams: &teams))
-                }
-
-                helpers.subtract(stopped)
+                let helpers = Set(leftovers(of: processIdentifier).filter { isStoppable($0, team: team, teams: &teams) }).subtracting(stopped)
 
                 guard !helpers.isEmpty else { return }
 
@@ -169,50 +124,50 @@ enum LeftoverHelpers {
         }
     }
 
-    // The processes in the instance's coalitions that started after it. A system extension the app
-    // borrowed can sit in its coalition too, but it started first.
-    private static func coalitionMembers(of instance: QuitInstance) -> [pid_t] {
-        return allProcesses().filter { member in
-            member != instance.processIdentifier
-                && coalition(of: member).map(instance.coalitions.contains) ?? false
-                && startDate(of: member).map { $0 >= instance.startDate } ?? false
-        }
-    }
+    // What LaunchServices is waiting on before the app can leave the Dock: processes left in its
+    // coalition, background-only apps it launched or inherited, and the processes those started. A
+    // system extension the app borrowed can sit in its coalition too, but it started before the app.
+    private static func leftovers(of processIdentifier: pid_t) -> [pid_t] {
+        guard let record = record(of: processIdentifier) else { return [] }
 
-    // What macOS still counts as the app: the processes in its coalition, and the background-only apps
-    // it launched along with their own coalitions. Reading a signature takes most of a millisecond,
-    // so each helper's developer is looked up once and only after the cheaper checks pass.
-    private static func leftovers(of instance: QuitInstance, launched: [pid_t], team: String, teams: inout [pid_t: String]) -> Set<pid_t> {
-        let candidates = coalitionMembers(of: instance) + launched.filter { startDate(of: $0).map { $0 >= instance.startDate } ?? false }
+        let launchTime = record["LSLaunchTime"] as? Date ?? .distantFuture
+        var leftovers = (record[coalitionProcessesKey] as? [pid_t] ?? []).filter { startDate(of: $0).map { $0 >= launchTime } ?? false }
+
+        for applicationSerialNumber in (record[launchedApplicationsKey] as? [CFTypeRef] ?? []) + (record[inheritedApplicationsKey] as? [CFTypeRef] ?? []) {
+            guard let launched = copyApplicationInformation?(currentSession, applicationSerialNumber, recordKeys as CFArray)?.takeRetainedValue() as? [String: Any],
+                  launched["ApplicationType"] as? String == "BackgroundOnly" else { continue }
+
+            leftovers += [launched["pid"] as? pid_t ?? 0] + (launched[coalitionProcessesKey] as? [pid_t] ?? [])
+        }
+
+        let inheritedCoalitions = Set(record[inheritedCoalitionsKey] as? [UInt64] ?? [])
+
+        if !inheritedCoalitions.isEmpty {
+            leftovers += allProcesses().filter { coalition(of: $0).map(inheritedCoalitions.contains) ?? false }
+        }
 
         // kill() with -1 would signal every process, so only real process ids get through.
-        return Set(candidates.filter { helper in
-            guard helper > 0,
-                  NSRunningApplication(processIdentifier: helper)?.activationPolicy != .regular,
-                  !WindowWatcher.showsWindows(helper) else { return false }
-
-            if teams[helper] == nil {
-                teams[helper] = teamIdentifier(of: helper) ?? ""
-            }
-
-            return teams[helper] == team && !KeepRunning.hasMenuBarItems(helper)
-        })
+        return leftovers.filter { $0 > 0 && $0 != processIdentifier }
     }
 
-    private static func launchedBackgroundApps(of processIdentifier: pid_t) -> [pid_t] {
-        guard let copyRunningApplications, let copyApplicationInformation,
-              let applications = copyRunningApplications(currentSession)?.takeRetainedValue() as? [CFTypeRef] else { return [] }
+    // Reading a signature takes most of a millisecond, so each helper's developer is looked up once.
+    private static func isStoppable(_ helper: pid_t, team: String, teams: inout [pid_t: String]) -> Bool {
+        guard NSRunningApplication(processIdentifier: helper)?.activationPolicy != .regular,
+              !WindowWatcher.showsWindows(helper) else { return false }
 
-        return applications.compactMap { application in
-            guard let information = copyApplicationInformation(currentSession, application, nil)?.takeRetainedValue() as? [String: Any],
-                  information["ApplicationType"] as? String == "BackgroundOnly",
-                  let parent = information["LSParentASN"],
-                  let parentInformation = copyApplicationInformation(currentSession, parent as CFTypeRef, nil)?.takeRetainedValue() as? [String: Any],
-                  parentInformation["pid"] as? pid_t == processIdentifier,
-                  let helper = information["pid"] as? pid_t, helper > 0 else { return nil }
-
-            return helper
+        if teams[helper] == nil {
+            teams[helper] = teamIdentifier(of: helper) ?? ""
         }
+
+        return teams[helper] == team && !KeepRunning.hasMenuBarItems(helper)
+    }
+
+    // LaunchServices keeps a quit app's record only while the Dock shows it running in the background.
+    private static func record(of processIdentifier: pid_t) -> [String: Any]? {
+        guard let createApplicationSerialNumber, let copyApplicationInformation,
+              let applicationSerialNumber = createApplicationSerialNumber(nil, processIdentifier)?.takeRetainedValue() else { return nil }
+
+        return copyApplicationInformation(currentSession, applicationSerialNumber, recordKeys as CFArray)?.takeRetainedValue() as? [String: Any]
     }
 
     private static func allProcesses() -> [pid_t] {
