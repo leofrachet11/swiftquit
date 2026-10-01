@@ -23,7 +23,13 @@ Swift Quit asks which windows are ordered in on any Space, using `NSWindow.windo
 
 When an app's last ordered-in window goes away, the app becomes a candidate. Minimising, hiding and going full screen do this too, since a full-screen transition leaves the app with no ordered-in windows for about half a second. After the close delay Swift Quit checks again, skips hidden apps, and asks Accessibility whether the app still has any window, minimised ones included. If a window comes back during the delay, the pending quit is cancelled and the delay starts over at the next close.
 
-Each check takes about 75 µs, 27 times less than reading the full window list. Swift Quit checks every 0.1 s while you're using the Mac and once a second after 3 s without input. Apps are asked to quit the way Cmd+Q asks them, so unsaved work brings up the usual save dialog. Nothing is force-quit.
+A window only counts if you could see it: at least 10% opaque, at least 40 points across and on a display. Word shows an invisible window while it opens a document, InDesign keeps one parked far off-screen and Steam keeps a 1-point one. Swift Quit looks at windows that don't count again every second, in case they fade or move into view. The size and position rule also applies to the windows Accessibility lists.
+
+Some apps draw their windows from a helper. Steam's window belongs to Steam Helper, an app inside Steam's bundle, so Steam itself never owns one. A window from a helper inside an app's bundle counts for that app, and Swift Quit asks Accessibility about the helper too.
+
+Apps also empty themselves. Splash screens and sign-in windows hand over to the next window, sometimes with a gap: Photoshop's splash screen disappears 0.1 to 0.2 s before its main window appears. So Swift Quit checks who closed the last window. If you clicked or pressed a key just before it went, the close was yours and your delay applies, 0 included. If not, or if the app launched less than 30 seconds ago, the app gets at least 3 seconds to open its next window. macOS reports how long ago you last clicked or typed without any permission.
+
+Swift Quit checks every 0.1 s while you're using the Mac and once a second after 3 s without input. Measured on macOS 27, that uses about 0.7% of one CPU core while you're active with a dozen windows open, 1.8% with 40, and about 0.1% when you're idle, plus 13 to 20 MB of memory. Most of it is AppKit's window list call, which asks the WindowServer about each window in turn. Apps are asked to quit the way Cmd+Q asks them, so unsaved work brings up the usual save dialog. Nothing is force-quit.
 
 ## Apps that should keep running
 
@@ -37,6 +43,20 @@ Some apps are meant to carry on without a window, like a VPN or a music player. 
 These checks only run for an app that's about to be quit, so they cost nothing while Swift Quit watches windows. The log says which one kept an app open. Under "Only these apps", the apps you list are quit even if they live in the menu bar, but not while they're busy. Your list and the app's own Dock status are checked again when the delay ends, so adding an app during the delay still saves it.
 
 That leaves your list for apps that keep working without a window and show none of these signs: a chat or mail app you keep open for notifications, a paused player you resume with the media keys, a timer, or a sync or download app that doesn't keep the Mac awake.
+
+## Apps left running in the background
+
+When an app quits but something it started is still running, macOS keeps it in the Dock with a grey dot and the label "Running in Background". It counts two kinds of leftover: processes in the app's coalition, which are the helpers it started itself, and background-only apps it launched. The Dock's "Stop Running in Background" sends those the terminate signal. Photoshop leaves two behind whether you quit it or Swift Quit does: Adobe's IPC broker and Creative Cloud's content manager. Vysor leaves its `adb` server.
+
+For apps Swift Quit looks after, it does what that menu item does, whoever quit the app. It waits 5 seconds, then sends all the leftovers the terminate signal at once, but only ones that:
+
+- are signed by the same developer as the app and started after it,
+- have no windows or menu bar icon,
+- aren't playing audio, keeping the Mac awake or using more than 2% of a CPU core.
+
+While any of them is still working, the app really is running in the background, so Swift Quit looks again every 5 seconds for a minute. After Photoshop quits, Creative Cloud's content manager uses more than a whole CPU core for about 7 seconds, so Photoshop's dot goes 10 to 30 seconds after the quit. If you open the app again in the meantime, its helpers are left for its next quit.
+
+The apps built into macOS carry no developer team, so they're left alone, and so are programs started from a terminal. A leftover from another developer keeps the dot: HTTP Toolkit starts the Android SDK's `adb` server, which other tools share. Apps on your exception list, and background apps like VPNs, are left alone. Nothing is force-quit.
 
 ## Install
 
@@ -54,7 +74,7 @@ The Homebrew cask `swift-quit` and swiftquit.com still ship the old 1.5.
 | --- | --- |
 | Start at login | Registers a login item with `SMAppService` |
 | Show menu bar icon | Hides the icon. Open the app again to get the settings back |
-| Quit after | Seconds between the last window closing and the app quitting. 0 quits straight away, but very short delays can catch an app that briefly closes its only window, like an editor reloading |
+| Quit after | Seconds between you closing the last window and the app quitting. 0 quits straight away. An app that closes its own window, or launched less than 30 s ago, gets at least 3 s |
 | Quit | Quit every app except the listed ones, or only the listed ones |
 
 The menu bar menu has a pause switch, and the icon dims while Swift Quit is paused. Finder is never quit.
@@ -91,11 +111,14 @@ It needs a Developer ID Application certificate, which you can create in Xcode >
 - Switching Spaces doesn't quit apps.
 - Apps that hide their window on close, like Notes and Calendar, get quit (with Accessibility access).
 - Apps meant to run without a window, like VPNs, music players and calls, are left running.
+- Apps that swap windows on their own, like Word opening a document, aren't quit in the gap.
+- Helpers an app leaves behind don't keep it in the Dock as "Running in Background".
+- Steam, which draws its window from a helper, gets quit.
 - The delay can be 0.
 - The menu bar menu can pause Swift Quit.
 - Apps are matched by bundle identifier instead of file path, so moving an app doesn't drop it from the list. 1.5 settings migrate on first launch.
 - No dependencies. Swindler, PromiseKit, AXSwift, LaunchAtLogin, Quick and Nimble are gone, launch at login uses `SMAppService`, and the 900-line storyboard is replaced by a small SwiftUI settings form.
-- The v1.5 artwork is back.
+- The v1.5 app icon is back, and the menu bar icon is a sharp template drawn from it.
 
 ## Credits
 

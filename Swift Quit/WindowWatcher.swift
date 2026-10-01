@@ -12,9 +12,26 @@ let userIdleThreshold = 3.0
 let accessibilityTimeout: Float = 1
 let countedWindowLayers = 0 ... 8
 
+// Word opens an invisible window while it loads a document, InDesign parks one far off-screen and
+// Steam keeps a 1-point one. A window has to be at least this opaque and this big, and on a display,
+// to count.
+let minimumWindowAlpha = 0.1
+let minimumWindowSide = 40.0
+// Windows can fade or move into view, so ones that didn't count are looked at again this often.
+let hiddenWindowRecheckInterval = 1.0
+
+// When an app empties itself (a splash screen handing over, a sign-in window closing), it gets at
+// least this long to open its next window before it's quit.
+let appClosedWindowGrace = 3.0
+// An app this new is still arranging its windows, whoever closed them.
+let recentlyLaunchedPeriod = 30.0
+// A click or key press this long before the windows vanished means the user closed them.
+let userCloseLeeway = 1.0
+
 let neverQuitBundleIdentifiers: Set<String> = ["com.apple.finder"]
 
 private let anyInputEventType = CGEventType(rawValue: ~0)!
+private let clickEventTypes: [CGEventType] = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
 private let log = Logger(subsystem: "onebadidea.Swift-Quit", category: "windowWatcher")
 
 /*
@@ -22,6 +39,7 @@ private let log = Logger(subsystem: "onebadidea.Swift-Quit", category: "windowWa
  what NSWindow.windowNumbers(options: [.allApplications, .allSpaces]) returns. That list survives
  Space switches and covered windows, and it leaves out the per-Space menu bar surfaces and the
  parked windows every app keeps but never shows. The Accessibility API only sees the current Space.
+ Windows too faint, too small or too far off-screen to see don't count either.
 
  Minimising, hiding, a full-screen transition and closing a window the app keeps in memory
  (Notes, Calendar, Activity Monitor) all order a window out, and the WindowServer describes them
@@ -34,12 +52,17 @@ private let log = Logger(subsystem: "onebadidea.Swift-Quit", category: "windowWa
 enum WindowWatcher {
 
     private static var windowOwners = [CGWindowID: pid_t]()
+    // The helper process behind a window that counts for its app, like Steam's.
+    private static var helperWindowOwners = [CGWindowID: pid_t]()
     private static var ignoredWindows = Set<CGWindowID>()
+    private static var hiddenWindows = Set<CGWindowID>()
+    private static var lastHiddenWindowCheck = Date.distantPast
     private static var previouslyOrderedIn = Set<CGWindowID>()
     private static var applicationsWithWindows = Set<pid_t>()
     private static var pendingQuits = [pid_t: Task<Void, Error>]()
     private static var pollingTask: Task<Void, Error>?
     private static var sessionActive = true
+    private static var lastPollTime = Date()
 
     static func start() {
         guard pollingTask == nil else { return }
@@ -67,6 +90,7 @@ enum WindowWatcher {
     private static func poll() {
         guard sessionActive else { return }
 
+        let pollTime = Date()
         let orderedIn = orderedInWindows()
 
         // Only an unavailable WindowServer returns nothing; reading that as "every window
@@ -88,61 +112,120 @@ enum WindowWatcher {
             previouslyOrderedIn = orderedInSet
         }
 
+        let windowsLastSeen = lastPollTime
+        lastPollTime = pollTime
+
         guard !Settings.paused else { return }
 
-        emptied.forEach(scheduleQuit)
+        for processIdentifier in emptied {
+            scheduleQuit(of: processIdentifier, windowsLastSeen: windowsLastSeen)
+        }
     }
 
     private static func owners(of identifiers: [CGWindowID]) -> Set<pid_t> {
-        let unknown = identifiers.filter { windowOwners[$0] == nil && !ignoredWindows.contains($0) }
+        let recheckHidden = Date().timeIntervalSince(lastHiddenWindowCheck) >= hiddenWindowRecheckInterval
+        let unknown = identifiers.filter { windowOwners[$0] == nil && !ignoredWindows.contains($0) && (recheckHidden || !hiddenWindows.contains($0)) }
 
-        for window in describe(unknown) {
-            guard let identifier = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value else { continue }
+        if !unknown.isEmpty {
+            let displays = onlineDisplayBounds()
 
-            let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
-            let owner = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
-
-            if let owner, countedWindowLayers.contains(layer) {
-                windowOwners[identifier] = owner
+            if recheckHidden {
+                lastHiddenWindowCheck = Date()
             }
-            else {
-                ignoredWindows.insert(identifier)
+
+            for window in describe(unknown) {
+                guard let identifier = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value else { continue }
+
+                let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
+
+                guard let owner = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, countedWindowLayers.contains(layer) else {
+                    ignoredWindows.insert(identifier)
+                    continue
+                }
+
+                if isVisible(window, on: displays) {
+                    let countedOwner = application(drawingFrom: owner)
+
+                    windowOwners[identifier] = countedOwner
+                    helperWindowOwners[identifier] = countedOwner == owner ? nil : owner
+                    hiddenWindows.remove(identifier)
+                }
+                else {
+                    hiddenWindows.insert(identifier)
+                }
             }
         }
 
         return Set(identifiers.compactMap { windowOwners[$0] })
     }
 
+    // Steam draws its window from a helper app inside its bundle, so Steam itself never owns one. A
+    // window like that counts for the app the helper works for.
+    private static func application(drawingFrom owner: pid_t) -> pid_t {
+        guard let helper = NSRunningApplication(processIdentifier: owner), helper.activationPolicy != .regular,
+              let responsible = responsibleProcess?(owner), responsible != owner,
+              let application = NSRunningApplication(processIdentifier: responsible), application.activationPolicy == .regular,
+              let helperPath = helper.bundleURL?.standardizedFileURL.path,
+              let applicationPath = application.bundleURL?.standardizedFileURL.path,
+              helperPath.hasPrefix(applicationPath + "/") else { return owner }
+
+        return responsible
+    }
+
+    private static func isVisible(_ window: [String: Any], on displays: [CGRect]) -> Bool {
+        let alpha = (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+
+        guard alpha >= minimumWindowAlpha,
+              let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { return false }
+
+        return bounds.width >= minimumWindowSide && bounds.height >= minimumWindowSide && displays.contains { $0.intersects(bounds) }
+    }
+
+    // Online rather than active displays, so a sleeping display doesn't make every window look off-screen.
+    private static func onlineDisplayBounds() -> [CGRect] {
+        var displays = [CGDirectDisplayID](repeating: 0, count: 16)
+        var count: UInt32 = 0
+        CGGetOnlineDisplayList(UInt32(displays.count), &displays, &count)
+
+        return displays.prefix(Int(count)).map(CGDisplayBounds)
+    }
+
     // Ordered-out windows stay known until they are destroyed, since without Accessibility they
     // are the only evidence of a minimised window.
     private static func forgetDestroyedWindows(orderedIn: Set<CGWindowID>) {
         ignoredWindows.formIntersection(orderedIn)
+        hiddenWindows.formIntersection(orderedIn)
 
         let orderedOut = windowOwners.keys.filter { !orderedIn.contains($0) }
         let surviving = Set(describe(orderedOut).compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
 
         for identifier in orderedOut where !surviving.contains(identifier) {
             windowOwners[identifier] = nil
+            helperWindowOwners[identifier] = nil
         }
     }
 
-    private static func scheduleQuit(of processIdentifier: pid_t) {
+    private static func scheduleQuit(of processIdentifier: pid_t, windowsLastSeen: Date) {
         guard pendingQuits[processIdentifier] == nil,
               let application = NSRunningApplication(processIdentifier: processIdentifier),
               shouldQuit(application) else { return }
 
+        let closeDelay = Double(Settings.closeDelay)
+        let delay = closedByUser(application, processIdentifier: processIdentifier, windowsLastSeen: windowsLastSeen) ? closeDelay : max(closeDelay, appClosedWindowGrace)
+
         // Cancelled by poll() if a window comes back, so the app has to stay windowless for the whole delay.
         pendingQuits[processIdentifier] = Task {
-            try await Task.sleep(for: .seconds(Settings.closeDelay))
+            try await Task.sleep(for: .seconds(delay))
 
             pendingQuits[processIdentifier] = nil
 
             // The list, or the app's own Dock presence, can change during the delay.
-            guard sessionActive, !Settings.paused, !application.isTerminated, !application.isHidden, shouldQuit(application), !hasWindows(application) else { return }
+            guard sessionActive, !Settings.paused, !application.isTerminated, !application.isHidden, shouldQuit(application), !hasWindows(processIdentifier) else { return }
 
             let name = application.localizedName ?? application.bundleIdentifier ?? "unnamed"
 
-            if let reason = KeepRunning.reason(for: application) {
+            if let reason = KeepRunning.reason(for: application, processIdentifier: processIdentifier) {
                 log.notice("Keeping \(name, privacy: .public) running because \(reason, privacy: .public)")
                 return
             }
@@ -153,17 +236,36 @@ enum WindowWatcher {
         }
     }
 
-    private static func hasWindows(_ application: NSRunningApplication) -> Bool {
-        let processIdentifier = application.processIdentifier
+    // Splash screens and sign-in windows hand over to the next window on their own, sometimes with a
+    // gap. A close the user made follows a click, or a key press in that app (a background window's
+    // red button works without switching to it), and macOS reports both without any permission.
+    // Anything else gets the grace period.
+    private static func closedByUser(_ application: NSRunningApplication, processIdentifier: pid_t, windowsLastSeen: Date) -> Bool {
+        if let launchDate = application.launchDate, Date().timeIntervalSince(launchDate) < recentlyLaunchedPeriod {
+            return false
+        }
+
+        let clickAge = clickEventTypes.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
+        let isFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == processIdentifier
+        let keyAge = isFrontmost ? CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown) : .infinity
+
+        return min(clickAge, keyAge) <= Date().timeIntervalSince(windowsLastSeen) + userCloseLeeway
+    }
+
+    // Takes the window owner's process id, since Steam's NSRunningApplication reports -1 as its own.
+    private static func hasWindows(_ processIdentifier: pid_t) -> Bool {
         let orderedIn = orderedInWindows()
 
         guard !orderedIn.isEmpty, !owners(of: orderedIn).contains(processIdentifier) else { return true }
 
-        if AXIsProcessTrusted(), let count = accessibilityWindowCount(processIdentifier) {
-            return count > 0
-        }
-
         let known = windowOwners.filter { $0.value == processIdentifier }.map(\.key)
+        // Accessibility only lists a helper's windows when asked about the helper.
+        let drawingProcesses = Set([processIdentifier] + known.compactMap { helperWindowOwners[$0] })
+        let accessibilityCounts = AXIsProcessTrusted() ? drawingProcesses.map(accessibilityWindowCount) : []
+
+        if !accessibilityCounts.isEmpty, !accessibilityCounts.contains(nil) {
+            return accessibilityCounts.contains { $0! > 0 }
+        }
 
         return !describe(known).isEmpty
     }
@@ -183,13 +285,42 @@ enum WindowWatcher {
 
         guard result == .success else { return nil }
 
-        return (windows as? [AXUIElement])?.count ?? 0
+        let displays = onlineDisplayBounds()
+
+        return (windows as? [AXUIElement])?.filter { couldBeSeen($0, on: displays) }.count ?? 0
+    }
+
+    // The same size and position rule as the WindowServer check, since Accessibility also lists
+    // Steam's 1-point window and InDesign's off-screen one. A frame that can't be read counts.
+    private static func couldBeSeen(_ window: AXUIElement, on displays: [CGRect]) -> Bool {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        var position = CGPoint.zero
+        var size = CGSize.zero
+
+        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let positionValue, let sizeValue,
+              AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else { return true }
+
+        let frame = CGRect(origin: position, size: size)
+
+        return size.width >= minimumWindowSide && size.height >= minimumWindowSide && displays.contains { $0.intersects(frame) }
+    }
+
+    // Whether the process itself draws any window Swift Quit counts, minimised ones included.
+    static func showsWindows(_ processIdentifier: pid_t) -> Bool {
+        return windowOwners.contains { (helperWindowOwners[$0.key] ?? $0.value) == processIdentifier }
     }
 
     private static func shouldQuit(_ application: NSRunningApplication) -> Bool {
+        return application.activationPolicy == .regular && application.isFinishedLaunching && manages(application)
+    }
+
+    // Whether the app is one Swift Quit looks after at all, going by who it is and the user's list.
+    static func manages(_ application: NSRunningApplication) -> Bool {
         guard application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-              application.activationPolicy == .regular,
-              application.isFinishedLaunching,
               let bundleIdentifier = application.bundleIdentifier,
               !neverQuitBundleIdentifiers.contains(bundleIdentifier) else { return false }
 

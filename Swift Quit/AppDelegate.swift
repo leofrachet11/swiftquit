@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         migrateVersionOneSettings()
         NSApp.mainMenu = makeMainMenu()
         WindowWatcher.start()
+        LeftoverHelpers.start()
 
         if Settings.menuBarIconVisible {
             setStatusItemVisible(true)
@@ -53,10 +54,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func openSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+            let hostingController = NSHostingController(rootView: SettingsView())
+            let window = NSWindow(contentViewController: hostingController)
             window.title = "Swift Quit"
             window.styleMask = [.titled, .closable]
             window.delegate = self
+
+            // SwiftUI sizes the window after it appears, so centring the empty window would pin its
+            // top-left corner to the middle of the screen.
+            window.setContentSize(hostingController.view.fittingSize)
             window.center()
             settingsWindow = window
         }
@@ -90,8 +96,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(named: "MenuIcon")
-        item.button?.image?.size = NSSize(width: 18, height: 18)
-        item.button?.image?.isTemplate = true
         item.button?.appearsDisabled = Settings.paused
 
         let pause = NSMenuItem(title: "Pause Swift Quit", action: #selector(togglePause), keyEquivalent: "")

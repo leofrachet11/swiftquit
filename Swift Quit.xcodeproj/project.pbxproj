@@ -13,6 +13,7 @@
 		B2C8BE2B283EC5D400DB5C94 /* WindowWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */; };
 		B2C8BE33283EC5D400DB5C94 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE32283EC5D400DB5C94 /* SettingsView.swift */; };
 		B2C8BE35283EC5D400DB5C94 /* KeepRunning.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE34283EC5D400DB5C94 /* KeepRunning.swift */; };
+		B2C8BE37283EC5D400DB5C94 /* LeftoverHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C8BE36283EC5D400DB5C94 /* LeftoverHelpers.swift */; };
 		B2C8BE20283EBF9100DB5C94 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -24,6 +25,7 @@
 		B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowWatcher.swift; sourceTree = "<group>"; };
 		B2C8BE32283EC5D400DB5C94 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B2C8BE34283EC5D400DB5C94 /* KeepRunning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepRunning.swift; sourceTree = "<group>"; };
+		B2C8BE36283EC5D400DB5C94 /* LeftoverHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftoverHelpers.swift; sourceTree = "<group>"; };
 		B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -63,6 +65,7 @@
 				B2C8BE2A283EC5D400DB5C94 /* WindowWatcher.swift */,
 				B2C8BE32283EC5D400DB5C94 /* SettingsView.swift */,
 				B2C8BE34283EC5D400DB5C94 /* KeepRunning.swift */,
+				B2C8BE36283EC5D400DB5C94 /* LeftoverHelpers.swift */,
 				B2C8BE1F283EBF9100DB5C94 /* Assets.xcassets */,
 			);
 			path = "Swift Quit";
@@ -143,6 +146,7 @@
 				B2C8BE2B283EC5D400DB5C94 /* WindowWatcher.swift in Sources */,
 				B2C8BE33283EC5D400DB5C94 /* SettingsView.swift in Sources */,
 				B2C8BE35283EC5D400DB5C94 /* KeepRunning.swift in Sources */,
+				B2C8BE37283EC5D400DB5C94 /* LeftoverHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -267,14 +271,14 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				MARKETING_VERSION = 2.2;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "onebadidea.Swift-Quit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
@@ -290,7 +294,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEAD_CODE_STRIPPING = YES;
 				DEPLOYMENT_POSTPROCESSING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -298,7 +302,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				MARKETING_VERSION = 2.2;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "onebadidea.Swift-Quit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;

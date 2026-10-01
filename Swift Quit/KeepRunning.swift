@@ -11,12 +11,12 @@ import IOKit.pwr_mgt
 // names that Chrome still uses while it plays media.
 let sleepPreventingAssertionTypes: Set<String> = ["PreventUserIdleSystemSleep", "PreventSystemSleep", "PreventUserIdleDisplaySleep", "NoIdleSleepAssertion", "NoDisplaySleepAssertion"]
 
-private typealias ResponsibleProcessFunction = @convention(c) (pid_t) -> pid_t
+typealias ResponsibleProcessFunction = @convention(c) (pid_t) -> pid_t
 
 // macOS records which app each helper works for, including WebKit's shared audio process, which
 // isn't a child of the app. The function that reads it is private, so it's looked up at runtime.
 // The -2 handle is RTLD_DEFAULT, a C macro Swift doesn't import.
-private let responsibleProcess = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid").map { unsafeBitCast($0, to: ResponsibleProcessFunction.self) }
+let responsibleProcess = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid").map { unsafeBitCast($0, to: ResponsibleProcessFunction.self) }
 
 /*
  Some apps are meant to carry on after their last window closes, like a VPN or a music player.
@@ -26,10 +26,9 @@ private let responsibleProcess = dlsym(UnsafeMutableRawPointer(bitPattern: -2), 
 enum KeepRunning {
 
     // Returns why the app should stay open, or nil if it should be quit. Naming an app under
-    // "Only these apps" overrides the guess that it's a background app, but not that it's busy.
-    static func reason(for application: NSRunningApplication) -> String? {
-        let processIdentifier = application.processIdentifier
-
+    // "Only these apps" overrides the guess that it's a background app, but not that it's busy. The
+    // process id is passed separately because Steam's NSRunningApplication reports -1 as its own.
+    static func reason(for application: NSRunningApplication, processIdentifier: pid_t) -> String? {
         if Settings.listMode == .quitAllExceptListed {
             if declaresBackgroundApp(application) {
                 return "it's a background app shown in the Dock"
@@ -51,8 +50,12 @@ enum KeepRunning {
         return nil
     }
 
+    static func isBusy(_ processIdentifier: pid_t) -> Bool {
+        return usesAudio(processIdentifier) || preventsSleep(processIdentifier)
+    }
+
     // Apps like NordVPN ship as menu bar apps and only take a Dock icon when you ask for one.
-    private static func declaresBackgroundApp(_ application: NSRunningApplication) -> Bool {
+    static func declaresBackgroundApp(_ application: NSRunningApplication) -> Bool {
         guard let bundleURL = application.bundleURL, let info = Bundle(url: bundleURL)?.infoDictionary else { return false }
 
         return ["LSUIElement", "LSBackgroundOnly"].contains { key in
@@ -62,7 +65,7 @@ enum KeepRunning {
 
     // macOS 27 keeps menu bar icons out of the window list, so only Accessibility can see them.
     // Without it the call fails and this returns false.
-    private static func hasMenuBarItems(_ processIdentifier: pid_t) -> Bool {
+    static func hasMenuBarItems(_ processIdentifier: pid_t) -> Bool {
         let element = AXUIElementCreateApplication(processIdentifier)
         AXUIElementSetMessagingTimeout(element, accessibilityTimeout)
 
